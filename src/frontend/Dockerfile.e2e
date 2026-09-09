@@ -1,0 +1,11 @@
+FROM mcr.microsoft.com/playwright:v1.62.1-noble
+
+WORKDIR /workspace/src/frontend
+
+COPY src/frontend/package.json src/frontend/package-lock.json ./
+RUN npm ci
+
+COPY src/frontend/playwright.config.ts ./
+COPY src/frontend/e2e ./e2e
+
+CMD ["npm", "run", "test:e2e"]

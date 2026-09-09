@@ -1,0 +1,13 @@
+.git
+.gitignore
+**/bin
+**/obj
+**/node_modules
+**/dist
+**/coverage
+tmp
+tickets
+*.md
+.env
+.env.*
+!.env.example

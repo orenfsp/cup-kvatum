@@ -1,0 +1,72 @@
+:root {
+  color-scheme: light;
+  font-family: "Onest Variable", "Segoe UI Variable", "Segoe UI", sans-serif;
+  color: #202722;
+  background: #fafbf8;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+
+  --font-sans: "Onest Variable", "Segoe UI Variable", "Segoe UI", sans-serif;
+  --color-ink: #202722;
+  --color-ink-soft: #536159;
+  --color-ink-muted: #6c776f;
+  --color-primary: #315f4e;
+  --color-primary-hover: #274d3f;
+  --color-primary-soft: #e7efe9;
+  --color-surface: #ffffff;
+  --color-surface-page: #fafbf8;
+  --color-surface-soft: #f3f6f2;
+  --color-line: #d9e0da;
+  --color-line-strong: #afbcb4;
+  --color-error: #934635;
+  --color-error-line: #ddb9ae;
+  --color-warning-surface: #fff7ef;
+  --color-focus: #b7d2c4;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --radius-field: 12px;
+  --radius-control: 14px;
+  --radius-panel: 20px;
+  --content-wide: 1120px;
+  --content-form: 760px;
+  --motion-fast: 120ms;
+  --motion-normal: 180ms;
+
+  --md-ref-typeface-brand: var(--font-sans);
+  --md-ref-typeface-plain: var(--font-sans);
+  --md-sys-typescale-label-large-font: var(--font-sans);
+  --md-sys-typescale-label-medium-font: var(--font-sans);
+  --md-sys-color-primary: var(--color-primary);
+  --md-sys-color-on-primary: #ffffff;
+  --md-sys-color-primary-container: var(--color-primary-soft);
+  --md-sys-color-on-primary-container: #18382d;
+  --md-sys-color-surface: var(--color-surface);
+  --md-sys-color-on-surface: var(--color-ink);
+  --md-sys-color-on-surface-variant: var(--color-ink-soft);
+  --md-sys-color-outline: #64746a;
+  --md-sys-color-outline-variant: var(--color-line);
+}
+
+md-filled-button,
+md-outlined-button {
+  --md-filled-button-container-height: 48px;
+  --md-filled-button-container-shape: var(--radius-control);
+  --md-filled-button-label-text-font: var(--font-sans);
+  --md-filled-button-label-text-size: 0.92rem;
+  --md-filled-button-label-text-weight: 650;
+  --md-outlined-button-container-height: 48px;
+  --md-outlined-button-container-shape: var(--radius-control);
+  --md-outlined-button-label-text-font: var(--font-sans);
+  --md-outlined-button-label-text-size: 0.92rem;
+  --md-outlined-button-label-text-weight: 650;
+  max-width: 100%;
+}

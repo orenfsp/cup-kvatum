@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/backend/Otklik.Domain/Otklik.Domain.csproj" />
+    <Project Path="src/backend/Otklik.Application/Otklik.Application.csproj" />
+    <Project Path="src/backend/Otklik.Infrastructure/Otklik.Infrastructure.csproj" />
+    <Project Path="src/backend/Otklik.Api/Otklik.Api.csproj" />
+    <Project Path="src/backend/Otklik.Worker/Otklik.Worker.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/backend/Otklik.IntegrationTests/Otklik.IntegrationTests.csproj" />
+    <Project Path="tests/backend/Otklik.UnitTests/Otklik.UnitTests.csproj" />
+  </Folder>
+</Solution>
