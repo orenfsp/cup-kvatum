@@ -19,7 +19,7 @@ test('public routes use the applicant language and keep the legacy status URL co
 test('operator sections support URL navigation, Back, Forward and refresh', async ({ page }) => {
   await login(page, 'operator', passwords.operator);
   await expect(page).toHaveURL(/\/staff\/operator\/queue$/u);
-  await expect(page.getByRole('heading', { name: 'Очередь обращений' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Разбор обращений' })).toBeVisible();
 
   await openRoleLink(page, 'Срочная помощь');
   await expect(page).toHaveURL(/\/staff\/operator\/urgent$/u);
@@ -30,6 +30,26 @@ test('operator sections support URL navigation, Back, Forward and refresh', asyn
   await page.reload();
   await expect(page).toHaveURL(/\/staff\/operator\/urgent$/u);
   await expect(page.getByRole('heading', { name: 'Срочная помощь' })).toBeVisible();
+});
+
+test('operator line opens one appeal without exposing the queue list', async ({ page }) => {
+  await login(page, 'operator', passwords.operator);
+  await page.goto('/staff/operator/line');
+  await expect(page.getByRole('heading', { name: 'Линия', exact: true })).toBeVisible();
+  await expect(page.locator('.queue-list')).toHaveCount(0);
+
+  const standardLine = page.locator('.operator-line-mode').filter({ hasText: 'Обычные' });
+  await standardLine.locator('md-outlined-button').click();
+  await expect(page).toHaveURL(/\/staff\/operator\/line\/standard\/[0-9a-f-]+$/u);
+  await expect(page.locator('[data-detail-heading]')).toBeVisible();
+  await expect(page.locator('.queue-list')).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(
+    await page.evaluate(() => document.documentElement.clientWidth),
+  );
+
+  await materialButton(page, 'Сменить линию').click();
+  await expect(page).toHaveURL(/\/staff\/operator\/line$/u);
+  await expect(page.getByRole('heading', { name: 'Линия', exact: true })).toBeVisible();
 });
 
 test('expert direct routes survive refresh', async ({ page }) => {

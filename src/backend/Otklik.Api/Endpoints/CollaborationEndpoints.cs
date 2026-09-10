@@ -90,8 +90,8 @@ public static class CollaborationEndpoints
         };
         database.ExpertWorkflowRequests.Add(request);
         await database.SaveChangesAsync(cancellationToken);
-        await updates.Clients.Group(AppealUpdatesHub.GroupName(appealId))
-            .SendAsync("AppealChanged", new { appealId, eventType = "WorkflowRequested" }, cancellationToken);
+        await ExpertWorkUpdateNotifier.NotifyAsync(
+            updates, database, appealId, "WorkflowRequested", cancellationToken);
         return Results.Created($"/api/staff/expert/appeals/{appealId}/workflow-requests/{request.Id}", RequestPayload(request));
     }
 
@@ -239,8 +239,8 @@ public static class CollaborationEndpoints
         await database.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         await RemoveStaleLeaseAsync(redis, appeal.Id);
-        await updates.Clients.Group(AppealUpdatesHub.GroupName(appeal.Id))
-            .SendAsync("AppealChanged", new { appealId = appeal.Id, appeal.Version, eventType = "CollaborationChanged" }, cancellationToken);
+        await ExpertWorkUpdateNotifier.NotifyAsync(
+            updates, database, appeal.Id, "CollaborationChanged", cancellationToken);
         return Results.Ok(RequestPayload(request));
     }
 
@@ -251,6 +251,7 @@ public static class CollaborationEndpoints
         HttpContext context,
         IAntiforgery antiforgery,
         OtklikDbContext database,
+        IHubContext<AppealUpdatesHub> updates,
         CancellationToken cancellationToken)
     {
         var csrf = await ValidateAntiforgeryAsync(context, antiforgery);
@@ -268,6 +269,8 @@ public static class CollaborationEndpoints
         request.DecidedAt = DateTimeOffset.UtcNow;
         request.Version++;
         await database.SaveChangesAsync(cancellationToken);
+        await ExpertWorkUpdateNotifier.NotifyAsync(
+            updates, database, request.AppealId, "WorkflowRejected", cancellationToken);
         return Results.Ok(RequestPayload(request));
     }
 
@@ -302,8 +305,8 @@ public static class CollaborationEndpoints
         appeal.Version++;
         await database.SaveChangesAsync(cancellationToken);
         await RemoveStaleLeaseAsync(redis, appealId);
-        await updates.Clients.Group(AppealUpdatesHub.GroupName(appealId))
-            .SendAsync("AppealChanged", new { appealId, appeal.Version, eventType = "CollaborationChanged" }, cancellationToken);
+        await ExpertWorkUpdateNotifier.NotifyAsync(
+            updates, database, appealId, "CollaborationChanged", cancellationToken);
         return Results.Ok(new { appeal.Id, appeal.Version });
     }
 

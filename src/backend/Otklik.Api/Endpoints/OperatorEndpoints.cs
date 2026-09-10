@@ -1,13 +1,16 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Otklik.Api.Hubs;
 using Otklik.Application.Appeals;
 using Otklik.Application.Attachments;
 using Otklik.Application.Security;
 using Otklik.Domain.Appeals;
 using Otklik.Infrastructure.Identity;
 using Otklik.Infrastructure.Persistence;
+using StackExchange.Redis;
 
 namespace Otklik.Api.Endpoints;
 
@@ -43,10 +46,14 @@ public static class OperatorEndpoints
 
     private static async Task<IResult> GetQueueAsync(
         string? sort,
+        ClaimsPrincipal principal,
+        HttpRequest request,
         OtklikDbContext database,
         IConfiguration configuration,
+        IConnectionMultiplexer redis,
         CancellationToken cancellationToken)
     {
+        if (!TryActorId(principal, out var operatorId)) return Results.Unauthorized();
         var overdueHours = Math.Max(1, configuration.GetValue("Operator:OverdueHours", 4));
         var now = DateTimeOffset.UtcNow;
         IQueryable<Appeal> query = database.Appeals
@@ -71,9 +78,15 @@ public static class OperatorEndpoints
         };
 
         var appeals = await query.ToListAsync(cancellationToken);
+        var workStates = await OperatorWorkLease.ReadStatesAsync(
+            redis,
+            appeals.Select(appeal => appeal.Id).ToArray(),
+            operatorId,
+            OperatorWorkLease.ReadLeaseId(request));
         var items = appeals.Select(appeal => new
         {
             appeal.Id,
+            caseNumber = CaseNumber(appeal.Id),
             appeal.Version,
             status = appeal.Status.ToString(),
             statusText = StatusText(appeal.Status),
@@ -86,6 +99,7 @@ public static class OperatorEndpoints
             applicantType = appeal.ApplicantType.ToString(),
             applicantTypeText = ApplicantTypeText(appeal.ApplicantType),
             category = appeal.Category?.DisplayName ?? "Категория не подтверждена",
+            workState = workStates.GetValueOrDefault(appeal.Id, OperatorWorkState.Available).ToString(),
             nextAction = appeal.Status == AppealStatus.New ? "Провести разбор" : "Назначить специалиста",
             blockingReason = appeal.CategoryId is null
                 ? "Нужно выбрать категорию"
@@ -148,6 +162,7 @@ public static class OperatorEndpoints
         return Results.Ok(new
         {
             appeal.Id,
+            caseNumber = CaseNumber(appeal.Id),
             appeal.Version,
             status = appeal.Status.ToString(),
             statusText = StatusText(appeal.Status),
@@ -203,6 +218,7 @@ public static class OperatorEndpoints
         HttpContext context,
         IAntiforgery antiforgery,
         OtklikDbContext database,
+        IConnectionMultiplexer redis,
         CancellationToken cancellationToken)
     {
         var antiforgeryError = await ValidateAntiforgeryAsync(context, antiforgery);
@@ -227,6 +243,7 @@ public static class OperatorEndpoints
             .SingleOrDefaultAsync(item => item.Id == appealId, cancellationToken);
         if (appeal is null) return Results.NotFound();
         if (!QueueStatuses.Contains(appeal.Status)) return InvalidState();
+        if (!await OperatorWorkLease.CanWriteAsync(redis, appeal.Id, actorId, request.LeaseId)) return WorkLeaseConflict();
         if (appeal.Version != request.ExpectedVersion) return VersionConflict();
 
         var now = DateTimeOffset.UtcNow;
@@ -292,6 +309,8 @@ public static class OperatorEndpoints
         HttpContext context,
         IAntiforgery antiforgery,
         OtklikDbContext database,
+        IConnectionMultiplexer redis,
+        IHubContext<AppealUpdatesHub> updates,
         CancellationToken cancellationToken)
     {
         var antiforgeryError = await ValidateAntiforgeryAsync(context, antiforgery);
@@ -304,6 +323,7 @@ public static class OperatorEndpoints
             .SingleOrDefaultAsync(item => item.Id == appealId, cancellationToken);
         if (appeal is null) return Results.NotFound();
         if (!QueueStatuses.Contains(appeal.Status)) return InvalidState();
+        if (!await OperatorWorkLease.CanWriteAsync(redis, appeal.Id, actorId, request.LeaseId)) return WorkLeaseConflict();
         if (appeal.Version != request.ExpectedVersion) return VersionConflict();
         if (appeal.CategoryId is null)
         {
@@ -339,7 +359,7 @@ public static class OperatorEndpoints
 
         if (expert.AtCapacity && (overrideReason?.Length ?? 0) < 10)
         {
-            return Validation("overrideReason", "Укажите причину ручного превышения лимита.");
+            return Validation("overrideReason", "Укажите причину ручного превышения лимита — не менее 10 символов.");
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -392,6 +412,16 @@ public static class OperatorEndpoints
             .ToListAsync(cancellationToken);
         alerts.ForEach(alert => alert.ResolvedAt = now);
         if (!await SaveAsync(database, cancellationToken)) return VersionConflict();
+        if (request.LeaseId is { } leaseId)
+        {
+            await OperatorWorkLease.ReleaseAsync(redis, appeal.Id, actorId, leaseId);
+        }
+        await ExpertWorkUpdateNotifier.NotifyAsync(
+            updates,
+            database,
+            appeal.Id,
+            appeal.Status.ToString(),
+            cancellationToken);
 
         return Results.Ok(new
         {
@@ -411,6 +441,7 @@ public static class OperatorEndpoints
         HttpContext context,
         IAntiforgery antiforgery,
         OtklikDbContext database,
+        IConnectionMultiplexer redis,
         CancellationToken cancellationToken)
     {
         var antiforgeryError = await ValidateAntiforgeryAsync(context, antiforgery);
@@ -434,6 +465,7 @@ public static class OperatorEndpoints
             .SingleOrDefaultAsync(item => item.Id == appealId, cancellationToken);
         if (appeal is null) return Results.NotFound();
         if (!QueueStatuses.Contains(appeal.Status)) return InvalidState();
+        if (!await OperatorWorkLease.CanWriteAsync(redis, appeal.Id, actorId, request.LeaseId)) return WorkLeaseConflict();
         if (appeal.Version != request.ExpectedVersion) return VersionConflict();
 
         var now = DateTimeOffset.UtcNow;
@@ -455,6 +487,10 @@ public static class OperatorEndpoints
             now));
         appeal.Version++;
         if (!await SaveAsync(database, cancellationToken)) return VersionConflict();
+        if (request.LeaseId is { } leaseId)
+        {
+            await OperatorWorkLease.ReleaseAsync(redis, appeal.Id, actorId, leaseId);
+        }
 
         return Results.Ok(new
         {
@@ -472,6 +508,7 @@ public static class OperatorEndpoints
         HttpContext context,
         IAntiforgery antiforgery,
         OtklikDbContext database,
+        IConnectionMultiplexer redis,
         CancellationToken cancellationToken)
     {
         var antiforgeryError = await ValidateAntiforgeryAsync(context, antiforgery);
@@ -489,6 +526,7 @@ public static class OperatorEndpoints
             .SingleOrDefaultAsync(item => item.Id == appealId, cancellationToken);
         if (appeal is null) return Results.NotFound();
         if (!QueueStatuses.Contains(appeal.Status)) return InvalidState();
+        if (!await OperatorWorkLease.CanWriteAsync(redis, appeal.Id, actorId, request.LeaseId)) return WorkLeaseConflict();
         if (appeal.Version != request.ExpectedVersion) return VersionConflict();
 
         var now = DateTimeOffset.UtcNow;
@@ -506,6 +544,10 @@ public static class OperatorEndpoints
             now));
         appeal.Version++;
         if (!await SaveAsync(database, cancellationToken)) return VersionConflict();
+        if (request.LeaseId is { } leaseId)
+        {
+            await OperatorWorkLease.ReleaseAsync(redis, appeal.Id, actorId, leaseId);
+        }
 
         return Results.Ok(new
         {
@@ -705,6 +747,9 @@ public static class OperatorEndpoints
     private static string? Normalize(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
+    private static string CaseNumber(Guid appealId) =>
+        $"ОБР-{appealId.ToString("N")[..8].ToUpperInvariant()}";
+
     private static IResult Validation(string field, string message) =>
         Results.ValidationProblem(new Dictionary<string, string[]> { [field] = [message] });
 
@@ -712,6 +757,12 @@ public static class OperatorEndpoints
         statusCode: StatusCodes.Status409Conflict,
         title: "Обращение уже изменилось",
         detail: "Другой оператор успел обновить обращение. Перезагрузите карточку перед повторным действием.");
+
+    private static IResult WorkLeaseConflict() => Results.Problem(
+        statusCode: StatusCodes.Status409Conflict,
+        title: "Обращение уже в работе",
+        detail: "Другой оператор уже разбирает это обращение. Вернитесь к очереди и выберите свободное.",
+        extensions: new Dictionary<string, object?> { ["operatorLeaseConflict"] = true });
 
     private static IResult InvalidState() => Results.Problem(
         statusCode: StatusCodes.Status409Conflict,
@@ -743,19 +794,26 @@ public static class OperatorEndpoints
         _ => "Статус изменен"
     };
 
-    private sealed record TriageRequest(Guid CategoryId, string? Priority, int ExpectedVersion, string? Reason);
+    private sealed record TriageRequest(
+        Guid CategoryId,
+        string? Priority,
+        int ExpectedVersion,
+        string? Reason,
+        Guid? LeaseId);
 
     private sealed record AssignRequest(
         Guid ExpertId,
         int ExpectedVersion,
         bool AllowOverCapacity,
-        string? OverrideReason);
+        string? OverrideReason,
+        Guid? LeaseId);
 
     private sealed record RejectRequest(
         string? ReasonCode,
         string? InternalReason,
-        int ExpectedVersion);
+        int ExpectedVersion,
+        Guid? LeaseId);
 
-    private sealed record ResolveRequest(string? Message, int ExpectedVersion);
+    private sealed record ResolveRequest(string? Message, int ExpectedVersion, Guid? LeaseId);
 
 }

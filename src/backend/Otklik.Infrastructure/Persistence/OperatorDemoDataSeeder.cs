@@ -111,6 +111,38 @@ public sealed class OperatorDemoDataSeeder(
         {
             await database.SaveChangesAsync(cancellationToken);
         }
+
+        var demoRequestId = ChildId(6, 800);
+        if (!await database.ExpertWorkflowRequests.AnyAsync(item => item.Id == demoRequestId, cancellationToken)
+            && await database.Appeals.AnyAsync(item => item.Id == DemoAppeals[5].Id, cancellationToken))
+        {
+            database.ExpertWorkflowRequests.Add(new ExpertWorkflowRequest
+            {
+                Id = demoRequestId,
+                ClientRequestId = ChildId(6, 801),
+                AppealId = DemoAppeals[5].Id,
+                Type = ExpertWorkflowRequestType.CoExecutor,
+                Reason = "Нужен медиатор, чтобы вместе подготовить безопасный порядок разговора.",
+                RequestedByUserId = PrimaryExpertUserId,
+                RequestedAt = seedStartedAt.AddMinutes(-18)
+            });
+        }
+
+        var demoComplaintId = ChildId(8, 810);
+        if (!await database.AppealComplaints.AnyAsync(item => item.Id == demoComplaintId, cancellationToken)
+            && await database.Appeals.AnyAsync(item => item.Id == DemoAppeals[7].Id, cancellationToken))
+        {
+            database.AppealComplaints.Add(new AppealComplaint
+            {
+                Id = demoComplaintId,
+                ClientComplaintId = ChildId(8, 811),
+                AppealId = DemoAppeals[7].Id,
+                Body = "Ответ специалиста показался слишком общим, и я не понял, какой безопасный шаг сделать первым.",
+                CreatedAt = seedStartedAt.AddMinutes(-12)
+            });
+        }
+
+        await database.SaveChangesAsync(cancellationToken);
         logger.LogInformation(
             "Development demo seed is ready; created {AppealCount} appeals across all workflow states",
             createdCount);

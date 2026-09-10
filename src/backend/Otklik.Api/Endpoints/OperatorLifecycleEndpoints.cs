@@ -69,6 +69,19 @@ public static class OperatorLifecycleEndpoints
             .SingleOrDefaultAsync(item => item.Id == appealId && item.Status == AppealStatus.Returned, cancellationToken);
         if (appeal is null) return Results.NotFound();
         var candidates = await EligibleExpertsAsync(database, appeal.CategoryId, cancellationToken);
+        var assignmentEvents = await database.AppealAssignmentEvents.AsNoTracking()
+            .Where(item => item.AppealId == appeal.Id)
+            .OrderBy(item => item.OccurredAt)
+            .Select(item => new { item.Id, item.EventType, item.OccurredAt })
+            .ToListAsync(cancellationToken);
+        var operatorDecisions = assignmentEvents.Select(item => new
+        {
+            item.Id,
+            decisionText = item.EventType == "Reassigned"
+                ? "Обращение повторно назначено специалисту"
+                : "Обращение назначено специалисту",
+            item.OccurredAt
+        });
         return Results.Ok(new
         {
             appeal.Id, appeal.Version, appeal.ReturnCount, appeal.ReturnedAt,
@@ -84,6 +97,7 @@ public static class OperatorLifecycleEndpoints
                 }),
             complaints = appeal.Complaints.Where(complaint => complaint.ResolvedAt == null)
                 .Select(complaint => new { complaint.Id, complaint.Body, complaint.CreatedAt }),
+            operatorDecisions,
             candidates
         });
     }
@@ -120,7 +134,7 @@ public static class OperatorLifecycleEndpoints
         });
         database.AppealStatusChanges.Add(StatusChange(appeal.Id, AppealStatus.Assigned, "Operator", now));
         if (!await SaveAsync(database, cancellationToken)) return VersionConflict();
-        await NotifyAsync(updates, appeal, "Reassigned", cancellationToken);
+        await NotifyAsync(updates, database, appeal, "Reassigned", cancellationToken);
         return Results.Ok(new { appeal.Id, appeal.Version, status = appeal.Status.ToString() });
     }
 
@@ -150,7 +164,7 @@ public static class OperatorLifecycleEndpoints
         });
         database.AppealStatusChanges.Add(StatusChange(appeal.Id, AppealStatus.Closed, "Operator", now));
         if (!await SaveAsync(database, cancellationToken)) return VersionConflict();
-        await NotifyAsync(updates, appeal, "Closed", cancellationToken);
+        await NotifyAsync(updates, database, appeal, "Closed", cancellationToken);
         return Results.Ok(new { appeal.Id, appeal.Version, status = appeal.Status.ToString() });
     }
 
@@ -192,8 +206,13 @@ public static class OperatorLifecycleEndpoints
         try { await database.SaveChangesAsync(cancellationToken); return true; }
         catch (DbUpdateConcurrencyException) { return false; }
     }
-    private static Task NotifyAsync(IHubContext<AppealUpdatesHub> updates, Appeal appeal, string change, CancellationToken token) =>
-        updates.Clients.Group(AppealUpdatesHub.GroupName(appeal.Id)).SendAsync("AppealChanged", new { appealId = appeal.Id, appeal.Version, eventType = change }, token);
+    private static Task NotifyAsync(
+        IHubContext<AppealUpdatesHub> updates,
+        OtklikDbContext database,
+        Appeal appeal,
+        string change,
+        CancellationToken token) =>
+        ExpertWorkUpdateNotifier.NotifyAsync(updates, database, appeal.Id, change, token);
     private static AppealStatusChange StatusChange(Guid appealId, AppealStatus status, string source, DateTimeOffset now) =>
         new() { Id = Guid.NewGuid(), AppealId = appealId, Status = status, Source = source, ChangedAt = now };
     private static async Task<IResult?> ValidateAntiforgeryAsync(HttpContext context, IAntiforgery antiforgery)

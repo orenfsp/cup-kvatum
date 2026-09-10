@@ -83,6 +83,7 @@ public sealed class ApplicantLifecycleTests
 
         var returnDetail = await GetJsonAsync(operatorClient, $"api/staff/operator/lifecycle/returns/{appeal.AppealId}");
         Assert.False(returnDetail.GetProperty("requiresFinalDecision").GetBoolean());
+        Assert.NotEmpty(returnDetail.GetProperty("operatorDecisions").EnumerateArray());
         Assert.Equal(HttpStatusCode.OK, (await PostCsrfAsync(operatorClient,
             $"api/staff/operator/lifecycle/returns/{appeal.AppealId}/reassign",
             new { expertId = ExpertId, expectedVersion = returnDetail.GetProperty("version").GetInt32() })).StatusCode);

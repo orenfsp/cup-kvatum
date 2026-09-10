@@ -30,6 +30,29 @@ public sealed class ExpertWorkflowTests
             "api/staff/expert/appeals?priority=Standard",
             TestContext.Current.CancellationToken);
         Assert.Contains(created.AppealId.ToString(), assignedList, StringComparison.OrdinalIgnoreCase);
+        using (var listDocument = JsonDocument.Parse(assignedList))
+        {
+            var listItem = listDocument.RootElement.GetProperty("items").EnumerateArray()
+                .Single(item => item.GetProperty("id").GetGuid() == created.AppealId);
+            Assert.Equal("Медиация конфликтов", listItem.GetProperty("specialization").GetString());
+            Assert.Equal("Ответственный", listItem.GetProperty("roleText").GetString());
+            Assert.Equal("Взять обращение в работу", listItem.GetProperty("nextAction").GetString());
+            Assert.NotEqual(default, listItem.GetProperty("lastActivityAt").GetDateTimeOffset());
+        }
+        var summary = await assignedExpert.GetFromJsonAsync<JsonElement>(
+            "api/staff/expert/appeals/work-summary",
+            TestContext.Current.CancellationToken);
+        Assert.True(summary.GetProperty("inbox").GetInt32() >= 1);
+        Assert.Equal(
+            summary.GetProperty("inbox").GetInt32() + summary.GetProperty("active").GetInt32(),
+            summary.GetProperty("actionRequired").GetInt32());
+        var assignedDetail = await assignedExpert.GetFromJsonAsync<JsonElement>(
+            $"api/staff/expert/appeals/{created.AppealId}",
+            TestContext.Current.CancellationToken);
+        Assert.Equal("Форма с категорией", assignedDetail.GetProperty("submissionPathText").GetString());
+        Assert.Equal("Взять обращение в работу", assignedDetail.GetProperty("nextAction").GetString());
+        Assert.Equal(1, assignedDetail.GetProperty("sequence").GetInt32());
+        Assert.Equal(0, assignedDetail.GetProperty("previousCycles").GetArrayLength());
         Assert.Equal(
             HttpStatusCode.NotFound,
             (await otherExpert.GetAsync(
@@ -146,6 +169,23 @@ public sealed class ExpertWorkflowTests
         Assert.Contains(recommendationText, readyJson, StringComparison.Ordinal);
         Assert.DoesNotContain(privateNote, readyJson, StringComparison.Ordinal);
         Assert.DoesNotContain("Эксперт по медиации", readyJson, StringComparison.Ordinal);
+
+        var helped = await applicant.PostAsJsonAsync(
+            "api/public/appeals/outcomes/helped",
+            new
+            {
+                trackNumber = created.TrackNumber,
+                clientActionId = Guid.NewGuid(),
+                expectedVersion = readyStatus.GetProperty("version").GetInt32()
+            },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, helped.StatusCode);
+        var completedList = await expert.GetStringAsync(
+            "api/staff/expert/appeals?status=Completed",
+            TestContext.Current.CancellationToken);
+        Assert.Contains(created.AppealId.ToString(), completedList, StringComparison.OrdinalIgnoreCase);
+        var completed = await GetExpertDetailsAsync(expert, created.AppealId);
+        Assert.Equal("Closed", completed.Status);
     }
 
     private static async Task<CreatedAppeal> CreateAssignedAppealAsync(

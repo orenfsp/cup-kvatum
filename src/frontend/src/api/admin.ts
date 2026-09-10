@@ -195,7 +195,16 @@ export async function interveneInStuckAppeal(appealId: string, request: {
   expectedVersion: number;
   reason: string;
 }) {
-  return adminPost(`/staff/administrator/stuck/${appealId}/intervene`, request);
+  return adminPost<{
+    id: string;
+    version: number;
+    status: string;
+    priority: string;
+    assignedExpertId: string | null;
+    assignedExpert: string | null;
+    changedAt: string;
+    auditEventId: string;
+  }>(`/staff/administrator/stuck/${appealId}/intervene`, request);
 }
 
 export async function getAdminAudit(filters: { action?: string; targetType?: string }) {

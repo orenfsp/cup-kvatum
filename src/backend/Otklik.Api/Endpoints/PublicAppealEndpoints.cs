@@ -474,7 +474,7 @@ public static class PublicAppealEndpoints
             return replay.Author == AppealMessageAuthor.Applicant && replay.Body == body
                 ? Results.Ok(new
                 {
-                    message = ApplicantMessagePayload(replay),
+                    message = ApplicantMessagePayload(replay, appeal.ApplicantType),
                     status = appeal.Status.ToString(),
                     statusText = StatusText(appeal.Status)
                 })
@@ -579,30 +579,36 @@ public static class PublicAppealEndpoints
             return duplicate.Author == AppealMessageAuthor.Applicant && duplicate.Body == body
                 ? Results.Ok(new
                 {
-                    message = ApplicantMessagePayload(duplicate),
+                    message = ApplicantMessagePayload(duplicate, appeal.ApplicantType),
                     status = AppealStatus.InProgress.ToString(),
                     statusText = StatusText(AppealStatus.InProgress)
                 })
                 : IdempotencyConflict();
         }
 
-        await updates.Clients.Group(AppealUpdatesHub.GroupName(appeal.Id))
-            .SendAsync("appealUpdated", new { appealId = appeal.Id, change = appeal.Status.ToString() }, cancellationToken);
+        await ExpertWorkUpdateNotifier.NotifyAsync(
+            updates,
+            database,
+            appeal.Id,
+            appeal.Status.ToString(),
+            cancellationToken);
         return Results.Created(
             $"/api/public/appeals/messages/{message.Id}",
             new
             {
-                message = ApplicantMessagePayload(message),
+                message = ApplicantMessagePayload(message, appeal.ApplicantType),
                 status = appeal.Status.ToString(),
                 statusText = StatusText(appeal.Status)
             });
     }
 
-    private static object ApplicantMessagePayload(AppealMessage message) => new
+    private static object ApplicantMessagePayload(AppealMessage message, ApplicantType applicantType) => new
     {
         message.Id,
         author = message.Author.ToString(),
-        authorLabel = message.Author == AppealMessageAuthor.Expert ? "Специалист" : "Вы",
+        authorLabel = message.Author == AppealMessageAuthor.Expert
+            ? "Специалист"
+            : applicantType == ApplicantType.Student ? "Ты" : "Вы",
         message.Body,
         message.CreatedAt
     };
@@ -950,14 +956,14 @@ public static class PublicAppealEndpoints
     {
         AppealStatus.New => "Обращение получено",
         AppealStatus.Triaged => "Обращение проверено оператором",
-        AppealStatus.Assigned => "Подключен специалист",
+        AppealStatus.Assigned => "Подключён специалист",
         AppealStatus.InProgress => "Специалист работает с обращением",
         AppealStatus.NeedsClarification => "Нужно уточнение",
         AppealStatus.RecommendationReady => "Подготовлена рекомендация",
         AppealStatus.Returned => "Обращение вернулось оператору",
         AppealStatus.Closed => "Обращение закрыто",
         AppealStatus.Rejected => "Работа с обращением завершена",
-        _ => "Статус обновлен"
+        _ => "Статус обновлён"
     };
 
     private sealed record CreateAppealRequest(

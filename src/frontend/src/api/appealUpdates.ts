@@ -9,3 +9,13 @@ export function createAppealUpdatesConnection(onUpdate: () => void) {
   connection.on('appealUpdated', onUpdate);
   return connection;
 }
+
+export function createExpertWorkUpdatesConnection(onUpdate: () => void) {
+  const connection = new HubConnectionBuilder()
+    .withUrl('/hubs/appeals')
+    .withAutomaticReconnect()
+    .configureLogging(LogLevel.Warning)
+    .build();
+  connection.on('expertWorkUpdated', onUpdate);
+  return connection;
+}

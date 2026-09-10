@@ -47,4 +47,27 @@ describe('URL-driven staff shell', () => {
     expect(screen.getByRole('link', { name: 'Срочная помощь' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('heading', { name: 'Срочная помощь' })).toBeInTheDocument();
   });
+
+  it('keeps a case attached to its source section and renders live work counts', () => {
+    const expertNavigation: StaffNavigationItem[] = [
+      { label: 'Новые назначения', to: '/staff/expert/inbox', count: 2, activeMatch: { pathPrefix: '/staff/expert/cases', searchParam: 'from', value: 'inbox' } },
+      { label: 'В работе', to: '/staff/expert/active', count: 4, meta: '4 требуют действия', attention: true, activeMatch: { pathPrefix: '/staff/expert/cases', searchParam: 'from', value: 'active' } },
+    ];
+    render(
+      <MemoryRouter initialEntries={['/staff/expert/cases/appeal-1/dialog?from=active']}>
+        <RoleNavigation
+          id="expert-navigation"
+          label="Кабинет эксперта"
+          items={expertNavigation}
+          open
+          onClose={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    const active = screen.getByRole('link', { name: 'В работе' });
+    expect(active).toHaveAttribute('aria-current', 'page');
+    expect(active.querySelector('[data-navigation-count]')).toHaveTextContent('4');
+    expect(active).toHaveTextContent('4 требуют действия');
+  });
 });

@@ -14,7 +14,8 @@ namespace Otklik.Api.Endpoints;
 public static class ExpertEndpoints
 {
     private static readonly AppealStatus[] VisibleStatuses =
-        [AppealStatus.Assigned, AppealStatus.InProgress, AppealStatus.NeedsClarification, AppealStatus.RecommendationReady];
+        [AppealStatus.Assigned, AppealStatus.InProgress, AppealStatus.NeedsClarification, AppealStatus.RecommendationReady,
+            AppealStatus.Closed];
     private static readonly IReadOnlyDictionary<string, string> QuestionLabels =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -30,6 +31,7 @@ public static class ExpertEndpoints
             .RequireAuthorization(StaffPolicies.ExpertOnly);
 
         appeals.MapGet("", GetAppealsAsync);
+        appeals.MapGet("/work-summary", GetWorkSummaryAsync);
         appeals.MapGet("/{appealId:guid}", GetAppealAsync);
         appeals.MapGet("/{appealId:guid}/attachments/{attachmentId:guid}", DownloadAttachmentAsync);
         appeals.MapPost("/{appealId:guid}/accept", AcceptAsync);
@@ -38,6 +40,36 @@ public static class ExpertEndpoints
         appeals.MapPost("/{appealId:guid}/recommendations", PublishRecommendationAsync);
 
         return endpoints;
+    }
+
+    private static async Task<IResult> GetWorkSummaryAsync(
+        ClaimsPrincipal principal,
+        OtklikDbContext database,
+        CancellationToken cancellationToken)
+    {
+        if (!TryActorId(principal, out var expertId)) return Results.Unauthorized();
+
+        var counts = await database.Appeals
+            .AsNoTracking()
+            .VisibleTo(expertId)
+            .Where(appeal => VisibleStatuses.Contains(appeal.Status))
+            .GroupBy(appeal => appeal.Status)
+            .Select(group => new { Status = group.Key, Count = group.Count() })
+            .ToDictionaryAsync(item => item.Status, item => item.Count, cancellationToken);
+
+        var inbox = counts.GetValueOrDefault(AppealStatus.Assigned);
+        var active = counts.GetValueOrDefault(AppealStatus.InProgress);
+        var waiting = counts.GetValueOrDefault(AppealStatus.NeedsClarification);
+        var completed = counts.GetValueOrDefault(AppealStatus.RecommendationReady)
+            + counts.GetValueOrDefault(AppealStatus.Closed);
+        return Results.Ok(new
+        {
+            inbox,
+            active,
+            waiting,
+            completed,
+            actionRequired = inbox + active
+        });
     }
 
     private static async Task<IResult> GetAppealsAsync(
@@ -61,13 +93,20 @@ public static class ExpertEndpoints
 
         if (!string.IsNullOrWhiteSpace(status))
         {
-            if (!Enum.TryParse<AppealStatus>(status, true, out var parsedStatus)
+            if (string.Equals(status, "Completed", StringComparison.OrdinalIgnoreCase))
+            {
+                query = query.Where(appeal =>
+                    appeal.Status == AppealStatus.RecommendationReady || appeal.Status == AppealStatus.Closed);
+            }
+            else if (!Enum.TryParse<AppealStatus>(status, true, out var parsedStatus)
                 || !VisibleStatuses.Contains(parsedStatus))
             {
                 return InvalidFilter("status", "Выберите доступный рабочий статус.");
             }
-
-            query = query.Where(appeal => appeal.Status == parsedStatus);
+            else
+            {
+                query = query.Where(appeal => appeal.Status == parsedStatus);
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(priority))
@@ -104,8 +143,16 @@ public static class ExpertEndpoints
                 category = appeal.Category != null ? appeal.Category.DisplayName : "Без категории",
                 role = appeal.AssignedExpertId == expertId ? AppealExpertRole.Responsible.ToString() : AppealExpertRole.CoExecutor.ToString(),
                 roleText = appeal.AssignedExpertId == expertId ? "Ответственный" : "Соисполнитель",
+                specialization = database.ExpertGroups
+                    .Where(group => group.Id == appeal.AppliedExpertGroupId)
+                    .Select(group => group.DisplayName)
+                    .FirstOrDefault() ?? "Профильная помощь",
                 receivedAt = appeal.CreatedAt,
-                assignedAt = appeal.AssignedAt
+                assignedAt = appeal.AssignedAt,
+                nextAction = NextAction(appeal.Status, appeal.AssignedExpertId == expertId),
+                lastActivityAt = appeal.StatusHistory
+                    .Select(change => (DateTimeOffset?)change.ChangedAt)
+                    .Max() ?? appeal.CreatedAt
             })
             .ToListAsync(cancellationToken);
 
@@ -122,11 +169,15 @@ public static class ExpertEndpoints
             items,
             filters = new
             {
-                statuses = VisibleStatuses.Select(value => new
+                statuses = new[]
                 {
-                    value = value.ToString(),
-                    label = StatusText(value)
-                }),
+                    new { value = AppealStatus.Assigned.ToString(), label = StatusText(AppealStatus.Assigned) },
+                    new { value = AppealStatus.InProgress.ToString(), label = StatusText(AppealStatus.InProgress) },
+                    new { value = AppealStatus.NeedsClarification.ToString(), label = StatusText(AppealStatus.NeedsClarification) },
+                    new { value = AppealStatus.RecommendationReady.ToString(), label = StatusText(AppealStatus.RecommendationReady) },
+                    new { value = AppealStatus.Closed.ToString(), label = StatusText(AppealStatus.Closed) },
+                    new { value = "Completed", label = "Все завершённые" }
+                },
                 priorities = Enum.GetValues<AppealPriority>().Select(value => new
                 {
                     value = value.ToString(),
@@ -190,6 +241,46 @@ public static class ExpertEndpoints
                 roleText = item.Role == AppealExpertRole.Responsible ? "Ответственный" : "Соисполнитель",
                 item.OccurredAt
             }).ToListAsync(cancellationToken);
+        var specialization = appeal.AppliedExpertGroupId is Guid groupId
+            ? await database.ExpertGroups.AsNoTracking()
+                .Where(group => group.Id == groupId)
+                .Select(group => group.DisplayName)
+                .SingleOrDefaultAsync(cancellationToken)
+            : null;
+        var previousCycleEntities = await database.Appeals
+            .AsNoTracking()
+            .Where(cycle => cycle.ThreadId == appeal.ThreadId && cycle.Sequence < appeal.Sequence)
+            .Include(cycle => cycle.Messages)
+            .Include(cycle => cycle.Recommendations)
+            .OrderBy(cycle => cycle.Sequence)
+            .ToListAsync(cancellationToken);
+        var previousCycles = previousCycleEntities.Select(cycle => new
+        {
+            sequence = cycle.Sequence,
+            statusText = StatusText(cycle.Status),
+            startedAt = cycle.CreatedAt,
+            completedAt = cycle.CompletedAt,
+            cycle.Narrative,
+            messages = cycle.Messages
+                .OrderByDescending(message => message.CreatedAt)
+                .Take(3)
+                .OrderBy(message => message.CreatedAt)
+                .Select(MessagePayload)
+                .ToArray(),
+            recommendations = cycle.Recommendations
+                .OrderByDescending(recommendation => recommendation.Version)
+                .Take(1)
+                .Select(RecommendationPayload)
+                .ToArray()
+        }).ToArray();
+        var lastActivityAt = new[] { appeal.CreatedAt }
+            .Concat(appeal.StatusHistory.Select(change => change.ChangedAt))
+            .Concat(appeal.Messages.Select(message => message.CreatedAt))
+            .Concat(appeal.InternalNotes.Select(note => note.CreatedAt))
+            .Concat(appeal.Recommendations.Select(recommendation => recommendation.CreatedAt))
+            .Concat(appeal.WorkflowRequests.Select(request => request.DecidedAt ?? request.RequestedAt))
+            .Max();
+        var responsible = appeal.AssignedExpertId == expertId;
 
         return Results.Ok(new
         {
@@ -202,10 +293,17 @@ public static class ExpertEndpoints
             applicantType = appeal.ApplicantType.ToString(),
             applicantTypeText = ApplicantTypeText(appeal.ApplicantType),
             category = appeal.Category?.DisplayName ?? "Без категории",
-            role = appeal.AssignedExpertId == expertId ? AppealExpertRole.Responsible.ToString() : AppealExpertRole.CoExecutor.ToString(),
-            roleText = appeal.AssignedExpertId == expertId ? "Ответственный" : "Соисполнитель",
+            role = responsible ? AppealExpertRole.Responsible.ToString() : AppealExpertRole.CoExecutor.ToString(),
+            roleText = responsible ? "Ответственный" : "Соисполнитель",
+            specialization = specialization ?? "Профильная помощь",
+            submissionPath = appeal.SubmissionPath.ToString(),
+            submissionPathText = appeal.SubmissionPath == SubmissionPath.FreeText ? "Свободная форма" : "Форма с категорией",
+            sequence = appeal.Sequence,
+            lastActivityAt,
+            nextAction = NextAction(appeal.Status, responsible),
             participants,
             assignmentHistory,
+            previousCycles,
             workflowRequests = appeal.WorkflowRequests
                 .OrderByDescending(request => request.RequestedAt)
                 .Select(request => new
@@ -322,7 +420,7 @@ public static class ExpertEndpoints
         appeal.Version++;
         database.AppealStatusChanges.Add(StatusChange(appeal.Id, AppealStatus.InProgress, "Expert", now));
         if (!await SaveAsync(database, cancellationToken)) return VersionConflict();
-        await NotifyAsync(updates, appeal, cancellationToken);
+        await NotifyAsync(updates, database, appeal, cancellationToken);
         return Results.Ok(VersionPayload(appeal));
     }
 
@@ -347,7 +445,10 @@ public static class ExpertEndpoints
         }
 
         var appealExists = await database.Appeals.VisibleTo(expertId).AnyAsync(
-            candidate => candidate.Id == appealId && VisibleStatuses.Contains(candidate.Status), cancellationToken);
+            candidate => candidate.Id == appealId
+                && VisibleStatuses.Contains(candidate.Status)
+                && candidate.Status != AppealStatus.Closed,
+            cancellationToken);
         if (!appealExists) return Results.NotFound();
         if (!await ExpertCollaborationAccess.HasValidComposerLeaseAsync(
                 database, redis, appealId, expertId, request.LeaseId, cancellationToken)) return ComposerLocked();
@@ -384,7 +485,7 @@ public static class ExpertEndpoints
             return replay.Body == body ? Results.Ok(NotePayload(replay)) : IdempotencyConflict();
         }
 
-        await NotifyAsync(updates, appealId, "NoteAdded", cancellationToken);
+        await NotifyAsync(updates, database, appealId, "NoteAdded", cancellationToken);
         return Results.Created($"/api/staff/expert/appeals/{appealId}/notes/{note.Id}", NotePayload(note));
     }
 
@@ -451,7 +552,7 @@ public static class ExpertEndpoints
         database.AppealStatusChanges.Add(StatusChange(appealId, AppealStatus.NeedsClarification, "Expert", now));
         if (!await SaveAsync(database, cancellationToken)) return VersionConflict();
 
-        await NotifyAsync(updates, appeal, cancellationToken);
+        await NotifyAsync(updates, database, appeal, cancellationToken);
         return Results.Created(
             $"/api/staff/expert/appeals/{appealId}/messages/{message.Id}",
             new { message = MessagePayload(message), appeal = VersionPayload(appeal) });
@@ -518,7 +619,7 @@ public static class ExpertEndpoints
         database.AppealStatusChanges.Add(StatusChange(appealId, AppealStatus.RecommendationReady, "Expert", now));
         if (!await SaveAsync(database, cancellationToken)) return VersionConflict();
 
-        await NotifyAsync(updates, appeal, cancellationToken);
+        await NotifyAsync(updates, database, appeal, cancellationToken);
         return Results.Created(
             $"/api/staff/expert/appeals/{appealId}/recommendations/{recommendation.Id}",
             new { recommendation = RecommendationPayload(recommendation), appeal = VersionPayload(appeal) });
@@ -531,6 +632,17 @@ public static class ExpertEndpoints
         attachment.ContentType,
         attachment.Size,
         attachment.CreatedAt
+    };
+
+    private static string NextAction(AppealStatus status, bool responsible) => status switch
+    {
+        AppealStatus.Assigned => "Взять обращение в работу",
+        AppealStatus.InProgress when responsible => "Ответить заявителю или подготовить итог",
+        AppealStatus.InProgress => "Поддержать работу ответственного специалиста",
+        AppealStatus.NeedsClarification => "Дождаться ответа заявителя",
+        AppealStatus.RecommendationReady => "Дождаться решения заявителя",
+        AppealStatus.Closed => "Работа завершена; доступен просмотр истории",
+        _ => "Проверить актуальное состояние"
     };
 
     private static object MessagePayload(AppealMessage message) => new
@@ -567,17 +679,18 @@ public static class ExpertEndpoints
 
     private static Task NotifyAsync(
         IHubContext<AppealUpdatesHub> updates,
+        OtklikDbContext database,
         Appeal appeal,
         CancellationToken cancellationToken) =>
-        NotifyAsync(updates, appeal.Id, appeal.Status.ToString(), cancellationToken);
+        NotifyAsync(updates, database, appeal.Id, appeal.Status.ToString(), cancellationToken);
 
     private static Task NotifyAsync(
         IHubContext<AppealUpdatesHub> updates,
+        OtklikDbContext database,
         Guid appealId,
         string change,
         CancellationToken cancellationToken) =>
-        updates.Clients.Group(AppealUpdatesHub.GroupName(appealId))
-            .SendAsync("appealUpdated", new { appealId, change }, cancellationToken);
+        ExpertWorkUpdateNotifier.NotifyAsync(updates, database, appealId, change, cancellationToken);
 
     private static AppealStatusChange StatusChange(
         Guid appealId,
@@ -670,6 +783,7 @@ public static class ExpertEndpoints
         AppealStatus.InProgress => "В работе",
         AppealStatus.NeedsClarification => "Ждет ответа заявителя",
         AppealStatus.RecommendationReady => "Ответ готов",
+        AppealStatus.Closed => "Завершено",
         _ => "Статус изменен"
     };
 

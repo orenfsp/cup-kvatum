@@ -139,7 +139,9 @@ internal static class PublicAppealStatusPayload
         {
             message.Id,
             author = message.Author.ToString(),
-            authorLabel = message.Author == AppealMessageAuthor.Expert ? "Специалист" : "Вы",
+            authorLabel = message.Author == AppealMessageAuthor.Expert
+                ? "Специалист"
+                : appeal.ApplicantType == ApplicantType.Student ? "Ты" : "Вы",
             message.Body,
             message.CreatedAt
         });
@@ -188,13 +190,13 @@ internal static class PublicAppealStatusPayload
     {
         AppealStatus.New => "Обращение получено",
         AppealStatus.Triaged => "Обращение проверено оператором",
-        AppealStatus.Assigned => "Подключен специалист",
+        AppealStatus.Assigned => "Подключён специалист",
         AppealStatus.InProgress => "Специалист работает с обращением",
         AppealStatus.NeedsClarification => "Нужно уточнение",
         AppealStatus.RecommendationReady => "Подготовлена рекомендация",
         AppealStatus.Returned => "Обращение вернулось оператору",
         AppealStatus.Closed => "Обращение закрыто",
         AppealStatus.Rejected => "Работа с обращением завершена",
-        _ => "Статус обновлен"
+        _ => "Статус обновлён"
     };
 }

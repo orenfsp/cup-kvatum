@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Link, NavLink, useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 
 export type StaffNavigationItem = {
   label: string;
   to: string;
+  count?: number;
+  meta?: string;
+  attention?: boolean;
   analytics?: boolean;
   activePrefixes?: string[];
+  activeMatch?: { pathPrefix: string; searchParam: string; value: string };
   end?: boolean;
 };
 
@@ -63,7 +67,11 @@ export function StaffAppShell({
 
   useEffect(() => {
     setNavigationOpen(false);
-    requestAnimationFrame(() => mainRef.current?.focus());
+    requestAnimationFrame(() => {
+      const main = mainRef.current;
+      if (!main || main.querySelector('[data-detail-heading], .page-header .staff-title')) return;
+      main.focus({ preventScroll: true });
+    });
   }, [location.pathname]);
 
   return (
@@ -140,20 +148,36 @@ export function RoleNavigation({
       </div>
       {items.map((item) => {
         const prefixActive = item.activePrefixes?.some((prefix) => location.pathname.startsWith(prefix));
+        const searchActive = item.activeMatch
+          && location.pathname.startsWith(item.activeMatch.pathPrefix)
+          && new URLSearchParams(location.search).get(item.activeMatch.searchParam) === item.activeMatch.value;
+        const routeActive = item.end
+          ? location.pathname === item.to
+          : location.pathname === item.to || location.pathname.startsWith(`${item.to}/`);
+        const active = routeActive || Boolean(prefixActive) || Boolean(searchActive);
+        const countId = item.count === undefined ? undefined : `${id}-${item.to.split('/').at(-1)}-count`;
         return (
-          <NavLink
-            className={({ isActive }) => [
+          <Link
+            className={[
               'staff-nav__item',
               item.analytics ? 'staff-nav__item--analytics' : '',
-              isActive || prefixActive ? 'staff-nav__item--active' : '',
+              item.attention ? 'staff-nav__item--attention' : '',
+              active ? 'staff-nav__item--active' : '',
             ].filter(Boolean).join(' ')}
             key={item.to}
             to={item.to}
-            end={item.end}
-            aria-current={prefixActive ? 'page' : undefined}
+            aria-label={item.label}
+            aria-describedby={countId}
+            aria-current={active ? 'page' : undefined}
           >
-            {item.label}
-          </NavLink>
+            <span className="staff-nav__item-label">{item.label}</span>
+            {item.count !== undefined ? (
+              <strong className="staff-nav__count" id={countId} data-navigation-count aria-live="polite">
+                {item.count}
+              </strong>
+            ) : null}
+            {item.meta ? <small className="staff-nav__meta">{item.meta}</small> : null}
+          </Link>
         );
       })}
     </nav>

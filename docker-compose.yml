@@ -8,7 +8,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-otklik}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      # PostgreSQL 18 stores versioned clusters below /var/lib/postgresql.
+      # Mount the parent so container recreation keeps the active cluster.
+      - postgres-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s

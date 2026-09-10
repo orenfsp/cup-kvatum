@@ -145,6 +145,7 @@ export function AppealIntake() {
     return (
       <TrackNumberSuccess
         result={created}
+        applicantType={applicantType ?? 'Parent'}
         needsImmediateHelp={crisisDetected}
         crisisSupport={optionsQuery.data?.crisisSupport ?? []}
       />
@@ -351,6 +352,7 @@ export function AppealIntake() {
 
               {crisisDetected ? (
                 <CrisisHelpPanel
+                  applicantType={applicantType ?? undefined}
                   contacts={optionsQuery.data.crisisSupport}
                   contactValue={crisisContact}
                   onContactChange={setCrisisContact}
@@ -402,7 +404,9 @@ export function AppealIntake() {
               {submitMutation.isError ? (
                 <div className="gentle-error" role="alert">
                   <p>{publicAppealError(submitMutation.error)}</p>
-                  {savedAppeal ? <p>Текст обращения уже сохранен. Исправьте или удалите файл и повторите загрузку.</p> : null}
+                  {savedAppeal ? <p>{applicantType === 'Student'
+                    ? 'Текст обращения уже сохранён. Исправь или удали файл и повтори загрузку.'
+                    : 'Текст обращения уже сохранён. Исправьте или удалите файл и повторите загрузку.'}</p> : null}
                 </div>
               ) : null}
 
@@ -434,14 +438,17 @@ function attachmentStatusText(attachment: PendingAttachment) {
 
 function TrackNumberSuccess({
   result,
+  applicantType,
   needsImmediateHelp,
   crisisSupport,
 }: {
   result: CreateAppealResponse;
+  applicantType: ApplicantType;
   needsImmediateHelp: boolean;
   crisisSupport: Awaited<ReturnType<typeof getIntakeOptions>>['crisisSupport'];
 }) {
   const [copyState, setCopyState] = useState('');
+  const isStudent = applicantType === 'Student';
 
   async function copyTrackNumber() {
     await navigator.clipboard.writeText(result.trackNumber);
@@ -449,7 +456,7 @@ function TrackNumberSuccess({
   }
 
   function saveTrackNumber() {
-    const content = `Отклик\nТрек-номер: ${result.trackNumber}\nСохраните его: без номера обращение нельзя открыть на другом устройстве.\n`;
+    const content = `Отклик\nТрек-номер: ${result.trackNumber}\n${isStudent ? 'Сохрани его' : 'Сохраните его'}: без номера обращение нельзя открыть на другом устройстве.\n`;
     const url = URL.createObjectURL(new Blob([content], { type: 'text/plain;charset=utf-8' }));
     const link = document.createElement('a');
     link.href = url;
@@ -463,12 +470,12 @@ function TrackNumberSuccess({
       <main className="intake-main">
         <section className="intake-card success-card" aria-labelledby="success-heading">
           <p className="eyebrow">Обращение принято</p>
-          <h1 id="success-heading" className="intake-title">Сохраните трек-номер</h1>
+          <h1 id="success-heading" className="intake-title">{isStudent ? 'Сохрани трек-номер' : 'Сохраните трек-номер'}</h1>
           <p className="intake-copy">
-            Мы не знаем вашего имени. Этот номер — единственный ключ к обращению на другом устройстве.
+            {isStudent ? 'Мы не знаем твоего имени.' : 'Мы не знаем вашего имени.'} Этот номер — единственный ключ к обращению на другом устройстве.
           </p>
           <p className="intake-copy">
-            На этом устройстве статус откроется через защищенный доступ без номера в адресе. Для общего устройства удалите доступ на странице статуса.
+            На этом устройстве обращение откроется через защищённый доступ без номера в адресе. {isStudent ? 'На общем устройстве удали доступ' : 'На общем устройстве удалите доступ'} в разделе «Доступ».
           </p>
           <div className="track-number" aria-label="Трек-номер обращения">{result.trackNumber}</div>
           {copyState ? <p className="copy-confirmation" role="status">{copyState}</p> : null}
@@ -478,11 +485,11 @@ function TrackNumberSuccess({
           </div>
           <div className="privacy-note privacy-note--plain">
             <strong>{result.statusText}</strong>
-            <span>Текст уже сохранен. Повторная отправка не создаст дубликат.</span>
+            <span>Текст уже сохранён. Повторная отправка не создаст дубликат.</span>
           </div>
-          {needsImmediateHelp ? <CrisisHelpPanel contacts={crisisSupport} compact /> : null}
-          <md-outlined-button onClick={() => window.location.assign('/appeal/status')}>
-            Открыть статус
+          {needsImmediateHelp ? <CrisisHelpPanel applicantType={applicantType} contacts={crisisSupport} compact /> : null}
+          <md-outlined-button onClick={() => window.location.assign('/appeal')}>
+            Открыть обращение
           </md-outlined-button>
         </section>
       </main>

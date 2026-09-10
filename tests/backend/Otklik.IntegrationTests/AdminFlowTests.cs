@@ -178,7 +178,7 @@ public sealed class AdminFlowTests
                 reason = ""
             });
         Assert.Equal(HttpStatusCode.BadRequest, missingReason.StatusCode);
-        await EnsureSuccessAsync(await PostCsrfAsync(
+        var intervention = await ReadJsonAsync(await PostCsrfAsync(
             administrator,
             $"api/staff/administrator/stuck/{created.AppealId}/intervene",
             new
@@ -189,6 +189,7 @@ public sealed class AdminFlowTests
                 expectedVersion = stuckItem.GetProperty("version").GetInt32(),
                 reason = "Возврат в операторскую очередь после проверки зависания"
             }));
+        var interventionAuditEventId = intervention.GetProperty("auditEventId").GetGuid();
 
         var deactivatedCategory = await ReadJsonAsync(await PostCsrfAsync(
             administrator,
@@ -212,6 +213,7 @@ public sealed class AdminFlowTests
         var auditItem = Assert.Single(
             audit.GetProperty("items").EnumerateArray(),
             item => item.GetProperty("targetId").GetGuid() == created.AppealId);
+        Assert.Equal(interventionAuditEventId, auditItem.GetProperty("id").GetGuid());
         var auditDetail = await GetJsonAsync(
             administrator,
             $"api/staff/administrator/audit/{auditItem.GetProperty("id").GetGuid()}");

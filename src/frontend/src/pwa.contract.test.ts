@@ -7,7 +7,7 @@ describe('privacy-preserving PWA contract', () => {
 
   it('starts from a neutral URL and has install metadata', () => {
     const manifest = JSON.parse(publicFile('manifest.webmanifest'));
-    expect(manifest.start_url).toBe('/appeal/status');
+    expect(manifest.start_url).toBe('/appeal');
     expect(manifest.display).toBe('standalone');
     expect(manifest.icons).toHaveLength(2);
     expect(JSON.stringify(manifest)).not.toMatch(/track|ticket|appealId/i);

@@ -1,6 +1,6 @@
 # Ticket 015 — Единый UX, навигация и непрерывная история обращения
 
-Статус: `IN_PROGRESS`. Отдельный UX-этап после завершенного MVP 001–014 выполняется одним Goal Mode по checkpoints 1–6.
+Статус: `DONE`. Отдельный UX-этап после завершенного MVP 001–014 выполнен одним Goal Mode по checkpoints 1–6.
 
 ## Краткий checkpoint для заказчика
 
@@ -854,10 +854,10 @@ Ticket 015 нельзя считать готовым, пока одноврем
 |---:|---|---|
 | 1. Routing и shells | DONE | React Router, общие shells/master-detail, role routes и mobile side sheet; Docker E2E 9 passed / 1 профильный skip |
 | 2. История заявителя | DONE | AppealThread/cycles, совместимая миграция 585 записей, routed public workspace; concurrent integration passed, Docker E2E 13 passed / 1 skip |
-| 3. Оператор | IN_PROGRESS | Начинается task-oriented master-detail пяти очередей и сценариев triage/crisis/requests/returns |
-| 4. Эксперт и медиация | PLANNED | — |
-| 5. Администратор | PLANNED | — |
-| 6. Копирайтинг и приемка | PLANNED | — |
+| 3. Оператор | DONE | Пять task-oriented очередей, последовательный triage, crisis boundary, requests/returns; Docker E2E и privacy checks прошли |
+| 4. Эксперт и медиация | DONE | Inbox/active/waiting/completed и Overview/Dialog/Notes/Answer/Team; preview, lease и mediation проверены в Docker |
+| 5. Администратор | DONE | Отдельные list/detail routes, связи конфигурации, impact confirmation, stuck diff → audit и безопасные выгрузки проверены |
+| 6. Копирайтинг и приемка | DONE | Тон «ты/вы», accessibility/responsive/visual checks, документация, C1–C8 и persistence после рестарта приняты |
 
 Одновременно только один checkpoint может иметь статус `IN_PROGRESS`.
 
@@ -871,10 +871,96 @@ Ticket 015 нельзя считать готовым, пока одноврем
 | 2026-09-09 | Staff navigation становится URL-driven | Back/Forward, refresh и прямые переходы должны работать предсказуемо |
 | 2026-09-09 | Expert workspace разделяется на Overview/Dialog/Notes/Answer/Team | Публичные и внутренние действия нельзя смешивать в одной длинной странице |
 | 2026-09-09 | Медиатор использует общий Expert UX | Одна роль и одна система взаимодействия, различается специализация, а не интерфейс |
+| 2026-09-09 | Операторская карточка использует Redis lease с TTL и атомарное «взять следующее»; PostgreSQL version остается финальной защитой записи | Общий список без закрепления допускает дублирование труда при параллельной работе, даже если конфликт сохранения уже предотвращен |
 
 ## Журнал выполнения
 
 Заполняется сверху после начала реализации.
+
+```text
+2026-09-09 23:59 +10:00 — post-acceptance — параллельная операторская очередь
+Готово: исправлена двухколоночная компоновка исходных сведений; общая и срочная очереди получили Redis lease 90 секунд/heartbeat 30 секунд, текстовые состояния занятости, блокировку чужой строки, дружелюбный direct-link conflict и атомарное серверное «взять следующее». После назначения, отклонения или завершения текущий lease освобождается, а следующая свободная задача выбирается атомарно. PostgreSQL version продолжает защищать фактическую запись от stale save.
+Проверки: frontend lint/build, Vitest 33/33; .NET build 0 warnings/errors, unit 38/38, live integration 30/30; operator Playwright mobile+desktop 5 passed/5 ожидаемых skips. Отдельные тесты подтверждают исправленную геометрию, недоступность одного appeal во втором окне и выдачу разных appealId двум одновременным acquire-next.
+Docker и URL: frontend/API пересобраны, volumes сохранены, все 6 сервисов healthy; http://localhost:3000/staff/operator/queue и /urgent.
+Риски/блокеры: нет; безопасная деградация при недоступном Redis блокирует выдачу новой работы.
+```
+
+```text
+2026-09-09 21:05 +10:00 — Checkpoint 6 — DONE; Ticket 015 — DONE
+Готово: завершена сквозная ревизия копирайтинга и тональности — для школьника интерфейс последовательно обращается на «ты», для взрослого на «вы»; кризисная помощь честно объясняет границу анонимного сервиса и показывает телефон 112, детский телефон доверия 8 800 2000 122 и короткий номер 124. Обновлены публичная история, форма продолжения, экран сохранения трек-номера, служебные статусы, административные названия действий и сущностей. Закреплены итоговые public/staff/admin routes, UX-контракты, дизайн-система, PWA start URL, README и DEMO. Focus token доведен до WCAG AA; release journey переписан под итоговую IA и C1–C8.
+Проверки: ESLint passed; Vitest 10 файлов, 32/32; TypeScript/Vite production build passed; .NET build — 0 warnings/errors; unit — 38/38; container integration — 29/29. Полный Playwright по Docker-стенду: 35 passed, 17 ожидаемых viewport skips, 0 failures; повтор race-сценария администратора — 3/3; актуальный release suite после тональности — 13 passed, 7 ожидаемых skips; финальные C3/C7 после проверки Back/Forward и viewport — 2/2.
+Docker и persistence: исправлен mount PostgreSQL 18 с `/var/lib/postgresql/data` на поддерживаемый `/var/lib/postgresql`; существующие данные безопасно перенесены из прежнего анонимного volume в именованный `otklik_postgres-data`, старый volume не удалялся. После отдельного `docker compose down` / `up -d` контрольное обращение `ОТК-6DFT-ERZV` сохранило историю и один цикл. Postgres, Redis, Kafka, API, worker и frontend — 6/6 healthy; frontend отвечает 200; severe runtime log matches — 0.
+Browser QA: Chromium подтвердил на публичном кризисном обращении неформальный текст, видимую общую историю, отсутствие требования ответа и три экстренных номера; административные overview/audit показывают спокойную Material-композицию и человекочитаемые безопасные поля без raw JSON. Автотестами подтверждены 320 px без horizontal scroll, keyboard-only navigation, focus/heading contrast, 200% text reflow, отсутствие градиентов, status pills, декоративных bullets, opacity halos и essential tooltips.
+Посмотреть: http://localhost:3000; обращение — http://localhost:3000/appeal; оператор — http://localhost:3000/staff/operator/queue; эксперт — http://localhost:3000/staff/expert/inbox; администратор — http://localhost:3000/staff/admin. Демонстрационные учётные данные и сценарии приведены в `DEMO.md`.
+Следующий шаг: отсутствует — все checkpoints 1–6 и критерии Ticket 015 выполнены.
+Риски/блокеры: блокеров нет. Vite сообщает только информационное предупреждение о размере одного chunk. Старый анонимный PostgreSQL volume намеренно оставлен как восстановительная копия и автоматически больше не подключается.
+```
+
+```text
+2026-09-09 19:59 +10:00 — Checkpoint 5 — DONE; Checkpoint 6 — IN_PROGRESS
+Готово: admin overview стал списком безопасных задач; категории, группы, правила, сотрудники, зависшие обращения и журнал получили отдельные list/detail routes. Категория → группа → правило связаны прямыми переходами и сохраняют контекст создания; detail категории показывает правило, группа — состав/лимит/доступность/использующие правила, правило — категорию/группу/версию. Создание и редактирование сотрудников отделено от списка, фильтры роли/доступа живут в URL, временный пароль показывается один раз с копированием. Блокировка и деактивация требуют confirmation с impact text. Stuck intervention оставляет immutable метаданные read-only, требует причину, показывает diff «Было → Станет» и после сохранения ведёт в точное audit event; audit отображает именованные безопасные поля без raw JSON. Исправлен focus arbitration shell/page header и фокус динамических success-состояний.
+Измененные маршруты и сценарии: /staff/admin, /categories/{id|new}, /expert-groups/{id|new}, /routing-rules/{id|new}, /users/{id|new}, /stuck/{appealId}, /audit/{eventId}, /staff/analytics; пройдены создание category → group → rule со сквозными ссылками, создание/изменение/блокировка учётки, разблокирование кризисного stuck appeal, переход в созданное событие и скачивание CSV.
+Проверки: ESLint passed; Vitest 29/29; Vite production build passed; .NET build 0 warnings/errors; unit 38/38; live AdminFlow integration 1/1. Новый admin Playwright — 2 passed/2 ожидаемо skipped; объединённый applicant+routing+operator+expert+admin suite — 22 passed/10 ожидаемо skipped по viewport. CUA desktop QA подтвердил спокойную Material-композицию, ограниченное полотно, list/detail, связи, task overview и audit без JSON/приватных данных; mobile 320 px, URL filters, focus и no-overflow подтверждены Playwright.
+Docker и URL: текущие frontend/API пересобраны из рабочего дерева; postgres, redis, kafka, api, worker и frontend — 6/6 healthy; readiness healthy для PostgreSQL/Redis/Kafka; runtime error matches — 0; volumes сохранены. Основной URL: http://localhost:3000/staff/admin.
+Что можно посмотреть: task overview; категории/группы/правила как отдельные связанные карточки; сотрудники с подтверждением отзыва сессий; stuck preview; безопасный audit detail; обезличенные CSV/XLSX в /staff/analytics.
+Следующий шаг: Checkpoint 6 — провести сквозную ревизию labels/helper/empty/error/success, унифицировать обращение «ты/вы», расширить keyboard/accessibility/contrast/zoom и visual assertions, обновить DESIGN_SYSTEM.md/README.md/DEMO.md и переписать legacy C1–C8 release journey под итоговую IA.
+Риски/блокеры: блокеров нет; демонстрационный volume накопил тестовые сущности, но lists ограничены собственными scroll-regions, приватный контент не входит в admin contracts, данные и volumes не удалялись.
+```
+
+```text
+2026-09-09 19:09 +10:00 — Checkpoint 4 — DONE; Checkpoint 5 — IN_PROGRESS
+Готово: кабинет эксперта разделён на URL-workspaces Overview/Dialog/Notes/Answer/Team; inbox/active/waiting/completed стали отдельными очередями, включая read-only закрытые обращения; header постоянно показывает статус, роль, специализацию, тип/форму, следующий шаг и последнюю активность. Публичный диалог, приватные заметки, preview публикации и командные запросы разведены; медиатор использует тот же shell; соисполнитель не может публиковать итог; lease показывается только рядом с заблокированным вводом. Исправлены logout с устаревшей staff-сессией, refetch карточки после внешнего действия, EF-агрегация последней активности и scroll/focus при открытии detail.
+Измененные маршруты и сценарии: /staff/expert/inbox, /active, /waiting, /completed и /cases/{appealId}/{overview|dialog|notes|answer|team}; пройдены принятие, заметка с unsaved guard, вопрос/ожидание/ответ заявителя, preview и публикация, закрытый архив, запрос соисполнителя, operator approval, вход соисполнителя и mediation context.
+Проверки: ESLint passed; Vitest 27/27; Vite production build passed; .NET build 0 warnings/errors; unit 38/38; live integration 29/29. Новый expert Playwright — 3 passed/3 ожидаемо skipped; объединённый applicant+routing+operator+expert suite — 20 passed/8 ожидаемо skipped по viewport. Ручной desktop QA подтвердил визуальную иерархию, открытие detail сверху, локальную навигацию и постоянные visibility-подписи; 320 px и keyboard focus подтверждены Playwright.
+Docker и URL: выполнен полный docker compose up -d --build из текущих файлов; postgres, redis, kafka, api, worker и frontend — 6/6 healthy; readiness healthy для PostgreSQL/Redis/Kafka, frontend 200, runtime error matches — 0; volumes не удалялись.
+Что можно посмотреть: http://localhost:3000/staff/expert/inbox, /active, /waiting, /completed; учетные записи expert и expert.mediator используют единый интерфейс, специализация и роль видны в header.
+Следующий шаг: Checkpoint 5 — перестроить admin routes в task-oriented list/detail, связать переходы категории → группы → правила, добавить impact/confirmation для доступа и деактивации, diff зависшего обращения и безопасный audit detail.
+Риски/блокеры: блокеров нет; накопленный demo volume велик из-за неиз destructive тестов, но очереди имеют собственный scroll-region и тесты адресуют созданные ими записи.
+```
+
+```text
+2026-09-09 18:14 +10:00 — Checkpoint 3 — DONE; Checkpoint 4 — IN_PROGRESS
+Готово: пять URL-driven областей оператора используют стабильный master-detail; triage раскрывает один шаг «понять → маршрут → назначить»; фильтры, scroll, Back/Forward, direct refresh и unsaved guard сохраняют контекст; crisis, expert requests и returns разведены; запросы показывают только ожидающие решения; stale conflict сохраняет безопасный локальный выбор; auto-next не блокируется guard; return 2 требует итогового объяснения.
+Измененные маршруты и сценарии: /staff/operator/queue/{id}, /urgent/{id}, /requests/{id}, /returns/{id}, /staff/analytics; реализованы assignment, rejection, crisis without contact, co-executor, return 1 reassign и mandatory return 2 close. Operator request/return API не раскрывают чат и заметки; return detail добавляет только whitelisted историю решений.
+Проверки: ESLint passed; Vitest 27/27; Vite production build passed; .NET unit 38/38; Docker integration 29/29; финальный combined Playwright routing+operator — 13 passed, 5 ожидаемо skipped по viewport; manual desktop/keyboard QA — Tab/Enter открывает detail и переводит фокус без scroll jump; 320 px horizontal overflow отсутствует.
+Docker и URL: выполнен полный docker compose -p otklik up --build -d; postgres, redis, kafka, api, worker, frontend — 6/6 healthy; API dependencies healthy, frontend 200, error matches в api/worker/frontend логах — 0; volumes сохранены.
+Что можно посмотреть: http://localhost:3000/staff/operator/queue, /urgent, /requests, /returns; в requests пустая очередь не засорена решёнными запросами, в crisis честно показаны 112, 8 800 2000 122 и 124 и граница помощи без контакта.
+Следующий шаг: Checkpoint 4 — разделить expert case на Overview/Dialog/Notes/Answer/Team, выстроить inbox/active/waiting/completed, preview публикации и единый mediation context.
+Риски/блокеры: блокеров нет; накопленный demo volume большой, но список изолирован в собственном scroll-region, а E2E адресует только созданные тестом записи без удаления данных.
+```
+
+```text
+2026-09-09 18:06 +10:00 — Checkpoint 3 — IN_PROGRESS; автоматические journeys зелёные, завершается приёмка
+Готово: устранена гонка UnsavedChangesGuard при auto-next через синхронную фиксацию сохраненного состояния; фильтры и поля получили однозначные accessible names; очередь запросов показывает только ожидающие решения; фокус detail больше не прокручивает весь desktop viewport; 320 px mobile master-detail проверен.
+Измененные маршруты и сценарии: URL прежние; queue journey прошёл assignment, rejection, stale recovery с сохранением выбора и защиту черновика; crisis journey подтвердил отсутствие ложного обещания без контакта; request/return journey прошёл co-executor, return 1 reassign и обязательное завершение return 2.
+Проверки: ESLint passed; Vitest 27/27; Vite build passed; новый Docker Playwright operator-workspace suite — 4 passed, 4 ожидаемо skipped по viewport-проекту; ручной keyboard journey Tab → строка → Enter открыл detail и перевёл фокус на заголовок; desktop queue/urgent/requests/returns визуально осмотрены.
+Docker и URL: обновленный frontend и API запущены на http://localhost:3000; volumes сохранены; предстоит финальный полный rebuild, integration suite, health/log checks и повторная ручная проверка исправленного scroll.
+Что можно посмотреть: пять task-oriented областей оператора, последовательные шаги triage, безопасную кризисную карточку с 112/8 800 2000 122/124, отдельные решения по запросам и возвратам.
+Следующий шаг: прогнать backend integration, полный Compose и финальный browser smoke; затем перевести Checkpoint 3 в DONE и начать Checkpoint 4.
+Риски/блокеры: блокеров нет; длинные DOM-списки отражают накопленный демонстрационный volume, но имеют отдельный scroll-region и безопасные метаданные.
+```
+
+```text
+2026-09-09 17:45 +10:00 — Checkpoint 3 — IN_PROGRESS; запускается Docker и сквозная проверка operator workspace
+Готово: основной triage теперь последовательно раскрывает один шаг; безопасные фильтры включают «Без специалиста»; detail получает фокус; in-memory scroll restoration и data-router UnsavedChangesGuard защищают список и черновики; 409 показывает актуализацию без сброса выбора; crisis дополнен 124 и tel-ссылками; requests/returns объясняют влияние решения и автоматически выбирают следующую задачу; return detail показывает только безопасную историю назначений.
+Измененные маршруты и сценарии: маршруты прежние; добавлен новый Playwright operator-workspace journey для queue filters/scroll/Back/Forward, triage/assignment/rejection, stale race, unsaved navigation, crisis without contact, co-executor request, return 1 и mandatory decision after return 2, а также mobile list/detail.
+Проверки: ESLint passed; Vitest 27/27; Vite production build passed; .NET unit tests 38/38; backend и integration project build — 0 warnings/errors.
+Docker и URL: запускается docker compose -p otklik up --build -d, затем профиль e2e-tests для operator-workspace.spec.ts; ожидается 6/6 healthy и успешные desktop/mobile journeys на http://localhost:3000/staff/operator/*.
+Что можно посмотреть: после rebuild — task-oriented queue, защищённый conflict recovery, отдельные crisis/request/return details.
+Следующий шаг: дождаться rebuild, выполнить новый Playwright suite, исправить фактические ошибки и затем провести ручной desktop/mobile/keyboard QA до перевода Checkpoint 3 в DONE.
+Риски/блокеры: блокеров нет; рабочий volume содержит много записей от предыдущих интеграционных запусков, поэтому тесты адресуют только собственные созданные обращения по безопасному staff ID и не удаляют volumes.
+```
+
+```text
+2026-09-09 17:14 +10:00 — Checkpoint 3 — IN_PROGRESS; восстановление после контрольного commit/push
+Готово: фактический срез b5518ba содержит URL-driven operator queue/urgent/requests/returns, master-detail основной и кризисной очередей, безопасные метаданные строк, URL-фильтры очереди и последовательные шаги triage; рабочее дерево чистое, origin/main синхронизирован.
+Измененные маршруты и сценарии: доступны /staff/operator/queue/{appealId}, /urgent/{appealId}, /requests/{appealId}, /returns/{appealId}; текущая реализация требует доказательной проверки полного набора checkpoint-сценариев и исправления обнаруженных UX-разрывов.
+Проверки: docker compose -p otklik ps — 6/6 сервисов запущены, api и frontend healthy; за последние 10 минут в api/worker/frontend нет fail/critical/unhandled/error; commit и remote содержат одинаковый HEAD b5518baf5e94d7f3a50aea604ca1dc001ab07ea5.
+Docker и URL: текущий рабочий срез доступен на http://localhost:3000/staff/operator/queue; существующие Docker volumes сохранены.
+Что можно посмотреть: основную очередь с фильтрами и шагами «Понять ситуацию → Определить маршрут → Назначить помощь», отдельную кризисную master-detail очередь.
+Следующий шаг: проверить код и реальный UI пяти операторских задач, добавить route/component/Playwright-покрытие сохранения фильтров, Back/Forward, auto-next, stale conflict, crisis, expert requests и оба возврата; затем пересобрать полный Compose и провести desktop/mobile/keyboard QA.
+Риски/блокеры: блокеров нет; operator requests и returns пока выглядят менее проработанными, чем основная/crisis очередь, и не считаются подтвержденными до browser journey и negative privacy checks.
+```
 
 ```text
 2026-09-09 11:50 +05:00 — Checkpoint 2 — DONE; Checkpoint 3 — IN_PROGRESS

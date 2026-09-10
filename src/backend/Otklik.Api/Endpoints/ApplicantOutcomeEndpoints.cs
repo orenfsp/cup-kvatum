@@ -53,7 +53,7 @@ public static class ApplicantOutcomeEndpoints
         database.AppealStatusChanges.Add(StatusChange(appeal.Id, AppealStatus.Closed, now));
         await EndParticipantsAsync(database, appeal.Id, now, cancellationToken);
         if (!await SaveAsync(database, cancellationToken)) return VersionConflict();
-        await NotifyAsync(updates, appeal, "Helped", cancellationToken);
+        await NotifyAsync(updates, database, appeal, "Helped", cancellationToken);
         return Results.Ok(OutcomePayload(appeal));
     }
 
@@ -102,7 +102,7 @@ public static class ApplicantOutcomeEndpoints
         database.AppealStatusChanges.Add(StatusChange(appeal.Id, AppealStatus.Returned, now));
         await EndParticipantsAsync(database, appeal.Id, now, cancellationToken);
         if (!await SaveAsync(database, cancellationToken)) return VersionConflict();
-        await NotifyAsync(updates, appeal, "Returned", cancellationToken);
+        await NotifyAsync(updates, database, appeal, "Returned", cancellationToken);
         return Results.Ok(OutcomePayload(appeal));
     }
 
@@ -203,9 +203,13 @@ public static class ApplicantOutcomeEndpoints
         catch (DbUpdateException) { return false; }
     }
 
-    private static Task NotifyAsync(IHubContext<AppealUpdatesHub> updates, Appeal appeal, string change,
-        CancellationToken cancellationToken) => updates.Clients.Group(AppealUpdatesHub.GroupName(appeal.Id))
-            .SendAsync("AppealChanged", new { appealId = appeal.Id, appeal.Version, eventType = change }, cancellationToken);
+    private static Task NotifyAsync(
+        IHubContext<AppealUpdatesHub> updates,
+        OtklikDbContext database,
+        Appeal appeal,
+        string change,
+        CancellationToken cancellationToken) =>
+        ExpertWorkUpdateNotifier.NotifyAsync(updates, database, appeal.Id, change, cancellationToken);
     private static AppealStatusChange StatusChange(Guid appealId, AppealStatus status, DateTimeOffset now) =>
         new() { Id = Guid.NewGuid(), AppealId = appealId, Status = status, Source = "Applicant", ChangedAt = now };
     private static object OutcomePayload(Appeal appeal) => new { appeal.Id, appeal.Version, status = appeal.Status.ToString(), statusText = StatusText(appeal.Status), appeal.ReturnCount };

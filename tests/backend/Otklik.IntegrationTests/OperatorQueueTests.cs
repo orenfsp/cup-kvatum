@@ -48,11 +48,15 @@ public sealed class OperatorQueueTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var document = JsonDocument.Parse(json);
         Assert.Equal(
+            $"ОБР-{created.AppealId:N}"[..12].ToUpperInvariant(),
+            document.RootElement.GetProperty("caseNumber").GetString());
+        Assert.Equal(
             BullyingCategoryId,
             document.RootElement.GetProperty("suggestion").GetProperty("categoryId").GetGuid());
         Assert.DoesNotContain("chat", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("note", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("messageHistory", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(created.TrackNumber, json, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -106,6 +110,127 @@ public sealed class OperatorQueueTests
         Assert.Contains("Assigned", publicJson, StringComparison.Ordinal);
         Assert.DoesNotContain("Эксперт демо", publicJson, StringComparison.Ordinal);
         Assert.DoesNotContain("Эксперт по медиации", publicJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Work_lease_prevents_duplicate_operator_work_and_can_be_released()
+    {
+        SkipWhenIntegrationTargetIsMissing();
+        using var firstWindow = CreateClient();
+        using var secondWindow = CreateClient();
+        var created = await CreateAppealAsync(
+            firstWindow,
+            submissionPath: "Category",
+            categoryId: ConflictCategoryId,
+            narrative: "Два оператора не должны одновременно разбирать это обращение");
+        await LoginAsync(firstWindow, "operator", "Operator!2026");
+        await LoginAsync(secondWindow, "operator", "Operator!2026");
+        var firstLease = Guid.NewGuid();
+        var secondLease = Guid.NewGuid();
+
+        var acquired = await PostWithCsrfAsync(
+            firstWindow,
+            $"api/staff/operator/work/{created.AppealId}/acquire",
+            new { leaseId = firstLease });
+        var blocked = await PostWithCsrfAsync(
+            secondWindow,
+            $"api/staff/operator/work/{created.AppealId}/acquire",
+            new { leaseId = secondLease });
+
+        Assert.Equal(HttpStatusCode.OK, acquired.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, blocked.StatusCode);
+
+        var details = await GetDetailsAsync(secondWindow, created.AppealId);
+        var blockedTriage = await PostWithCsrfAsync(
+            secondWindow,
+            $"api/staff/operator/queue/{created.AppealId}/triage",
+            new
+            {
+                categoryId = ConflictCategoryId,
+                priority = "Standard",
+                expectedVersion = details.Version,
+                leaseId = secondLease
+            });
+        Assert.Equal(HttpStatusCode.Conflict, blockedTriage.StatusCode);
+
+        Assert.Equal(
+            HttpStatusCode.NoContent,
+            (await PostWithCsrfAsync(
+                firstWindow,
+                $"api/staff/operator/work/{created.AppealId}/release",
+                new { leaseId = firstLease })).StatusCode);
+        var reacquired = await PostWithCsrfAsync(
+            secondWindow,
+            $"api/staff/operator/work/{created.AppealId}/acquire",
+            new { leaseId = secondLease });
+        Assert.Equal(HttpStatusCode.OK, reacquired.StatusCode);
+        await PostWithCsrfAsync(
+            secondWindow,
+            $"api/staff/operator/work/{created.AppealId}/release",
+            new { leaseId = secondLease });
+
+        var firstNextTask = PostWithCsrfAsync(
+            firstWindow,
+            "api/staff/operator/work/acquire-next",
+            new { leaseId = firstLease, scope = "queue" });
+        var secondNextTask = PostWithCsrfAsync(
+            secondWindow,
+            "api/staff/operator/work/acquire-next",
+            new { leaseId = secondLease, scope = "queue" });
+        await Task.WhenAll(firstNextTask, secondNextTask);
+        var firstNext = await firstNextTask;
+        var secondNext = await secondNextTask;
+        Assert.Equal(HttpStatusCode.OK, firstNext.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, secondNext.StatusCode);
+        using var firstNextJson = JsonDocument.Parse(await firstNext.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        using var secondNextJson = JsonDocument.Parse(await secondNext.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        var firstNextId = firstNextJson.RootElement.GetProperty("appealId").GetGuid();
+        var secondNextId = secondNextJson.RootElement.GetProperty("appealId").GetGuid();
+        Assert.NotEqual(firstNextId, secondNextId);
+        await PostWithCsrfAsync(firstWindow, $"api/staff/operator/work/{firstNextId}/release", new { leaseId = firstLease });
+        await PostWithCsrfAsync(secondWindow, $"api/staff/operator/work/{secondNextId}/release", new { leaseId = secondLease });
+    }
+
+    [Fact]
+    public async Task Acquire_next_can_select_an_exact_priority_line()
+    {
+        SkipWhenIntegrationTargetIsMissing();
+        using var client = CreateClient();
+        var created = await CreateAppealAsync(
+            client,
+            submissionPath: "Category",
+            categoryId: ConflictCategoryId,
+            narrative: "Проверка последовательной линии обращений низкого приоритета");
+        await LoginAsync(client, "operator", "Operator!2026");
+        var details = await GetDetailsAsync(client, created.AppealId);
+        var triage = await PostWithCsrfAsync(client, $"api/staff/operator/queue/{created.AppealId}/triage", new
+        {
+            categoryId = ConflictCategoryId,
+            priority = "Low",
+            expectedVersion = details.Version
+        });
+        Assert.Equal(HttpStatusCode.OK, triage.StatusCode);
+
+        var leaseId = Guid.NewGuid();
+        var acquired = await PostWithCsrfAsync(
+            client,
+            "api/staff/operator/work/acquire-next",
+            new { leaseId, scope = "queue", priority = "Low" });
+        Assert.Equal(HttpStatusCode.OK, acquired.StatusCode);
+        using var acquiredJson = JsonDocument.Parse(
+            await acquired.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        var acquiredId = acquiredJson.RootElement.GetProperty("appealId").GetGuid();
+        var selected = await client.GetAsync(
+            $"api/staff/operator/queue/{acquiredId}",
+            TestContext.Current.CancellationToken);
+        using var selectedJson = JsonDocument.Parse(
+            await selected.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        Assert.Equal("Low", selectedJson.RootElement.GetProperty("priority").GetString());
+
+        await PostWithCsrfAsync(
+            client,
+            $"api/staff/operator/work/{acquiredId}/release",
+            new { leaseId });
     }
 
     [Fact]
@@ -173,6 +298,13 @@ public sealed class OperatorQueueTests
             expectedVersion = overCapacity.Version,
             allowOverCapacity = false
         });
+        var tooShort = await PostWithCsrfAsync(client, $"api/staff/operator/queue/{overCapacity.Id}/assign", new
+        {
+            expertId = target.Id,
+            expectedVersion = overCapacity.Version,
+            allowOverCapacity = true,
+            overrideReason = "123456789"
+        });
         var overridden = await PostWithCsrfAsync(client, $"api/staff/operator/queue/{overCapacity.Id}/assign", new
         {
             expertId = target.Id,
@@ -182,6 +314,8 @@ public sealed class OperatorQueueTests
         });
 
         Assert.Equal(HttpStatusCode.Conflict, blocked.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, tooShort.StatusCode);
+        Assert.Contains("не менее 10 символов", await tooShort.Content.ReadAsStringAsync(TestContext.Current.CancellationToken), StringComparison.Ordinal);
         Assert.Contains(
             "capacityOverrideRequired",
             await blocked.Content.ReadAsStringAsync(TestContext.Current.CancellationToken),

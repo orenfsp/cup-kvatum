@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import { getAnalyticsDashboard } from '../api/analytics';
 import { AnalyticsWorkspace } from './AnalyticsWorkspace';
@@ -36,7 +37,11 @@ describe('AnalyticsWorkspace', () => {
     });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
-    render(<QueryClientProvider client={client}><AnalyticsWorkspace /></QueryClientProvider>);
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={client}><AnalyticsWorkspace /></QueryClientProvider>
+      </MemoryRouter>,
+    );
 
     expect(await screen.findByRole('heading', { name: 'Аналитика' })).toBeInTheDocument();
     expect(screen.getByText(/Тексты, чат, заметки, файлы/)).toBeInTheDocument();

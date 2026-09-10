@@ -9,6 +9,7 @@ import {
   getAnalyticsDashboard,
   type AnalyticsDistribution,
 } from '../api/analytics';
+import { PageHeader } from './ux/WorkspacePrimitives';
 
 export function AnalyticsWorkspace() {
   const [days, setDays] = useState(30);
@@ -27,14 +28,12 @@ export function AnalyticsWorkspace() {
 
   return (
     <section className="analytics-workspace" aria-labelledby="analytics-heading">
-      <header className="analytics-heading">
-        <p className="eyebrow">Обезличенная статистика</p>
-        <h1 id="analytics-heading" className="staff-title">Аналитика</h1>
-        <p className="staff-copy">
-          Показатели рассчитаны только по служебным метаданным. Тексты, чат, заметки, файлы,
-          контакты и трек-номера не попадают в этот раздел и выгрузки.
-        </p>
-      </header>
+      <PageHeader
+        id="analytics-heading"
+        eyebrow="Обезличенная статистика"
+        title="Аналитика"
+        description="Показатели рассчитаны только по служебным метаданным. Тексты, чат, заметки, файлы, контакты и трек-номера не попадают в этот раздел и выгрузки."
+      />
 
       <div className="analytics-toolbar">
         <label>

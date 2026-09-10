@@ -16,6 +16,17 @@ export type ExpertAppealItem = {
   assignedAt: string | null;
   role: 'Responsible' | 'CoExecutor';
   roleText: string;
+  specialization: string;
+  nextAction: string;
+  lastActivityAt: string;
+};
+
+export type ExpertWorkSummary = {
+  inbox: number;
+  active: number;
+  waiting: number;
+  completed: number;
+  actionRequired: number;
 };
 
 export type ExpertFilter = { value: string; label: string };
@@ -45,6 +56,10 @@ export type ExpertAttachment = {
 };
 
 export type ExpertAppealDetail = ExpertAppealItem & {
+  submissionPath: string;
+  submissionPathText: string;
+  sequence: number;
+  nextAction: string;
   narrative: string | null;
   answers: Array<{ questionCode: string; question: string; value: string }>;
   attachments: ExpertAttachment[];
@@ -62,6 +77,15 @@ export type ExpertAppealDetail = ExpertAppealItem & {
     occurredAt: string;
   }>;
   workflowRequests: ExpertWorkflowRequest[];
+  previousCycles: Array<{
+    sequence: number;
+    statusText: string;
+    startedAt: string;
+    completedAt: string | null;
+    narrative: string | null;
+    messages: Array<{ id: string; author: string; authorLabel: string; body: string; createdAt: string }>;
+    recommendations: Array<{ id: string; version: number; body: string; createdAt: string }>;
+  }>;
 };
 
 export type ExpertWorkflowRequest = {
@@ -98,6 +122,11 @@ export async function getExpertAppeals(filters: ExpertAppealFilters) {
       categoryId: filters.categoryId || undefined,
     },
   });
+  return response.data;
+}
+
+export async function getExpertWorkSummary() {
+  const response = await apiClient.get<ExpertWorkSummary>('/staff/expert/appeals/work-summary');
   return response.data;
 }
 

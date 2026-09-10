@@ -34,6 +34,7 @@ export type ReturnDetail = LifecycleWork['returns'][number] & {
     createdAt: string;
   }>;
   complaints: Array<{ id: string; body: string; createdAt: string }>;
+  operatorDecisions: Array<{ id: string; decisionText: string; occurredAt: string }>;
   candidates: Array<{ id: string; displayName: string }>;
 };
 

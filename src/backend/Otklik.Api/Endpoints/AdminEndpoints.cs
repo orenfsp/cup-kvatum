@@ -827,9 +827,10 @@ public static class AdminEndpoints
             .Where(item => item.AppealId == appeal.Id && item.ResolvedAt == null)
             .ToListAsync(cancellationToken);
         alerts.ForEach(item => item.ResolvedAt = now);
-        database.AdministrativeAuditEvents.Add(Audit(
+        var auditEvent = Audit(
             guard.Actor!, "StuckAppealIntervened", "Appeal", appeal.Id, before,
-            AppealMetadata(appeal), reason, now));
+            AppealMetadata(appeal), reason, now);
+        database.AdministrativeAuditEvents.Add(auditEvent);
         if (!await SaveAsync(database, cancellationToken)) return VersionConflict("Обращение");
         return Results.Ok(new
         {
@@ -839,7 +840,8 @@ public static class AdminEndpoints
             priority = appeal.Priority.ToString(),
             appeal.AssignedExpertId,
             assignedExpert = expert?.DisplayName,
-            changedAt = now
+            changedAt = now,
+            auditEventId = auditEvent.Id
         });
     }
 

@@ -6,6 +6,7 @@ export type AppealPriority = 'Low' | 'Standard' | 'Urgent';
 
 export type OperatorQueueItem = {
   id: string;
+  caseNumber: string;
   version: number;
   status: string;
   statusText: string;
@@ -18,6 +19,7 @@ export type OperatorQueueItem = {
   applicantType: string;
   applicantTypeText: string;
   category: string;
+  workState: 'Available' | 'Mine' | 'Busy';
   nextAction: string;
   blockingReason: string | null;
   hasAttachments: boolean;
@@ -34,6 +36,7 @@ export type OperatorQueueResponse = {
 
 export type OperatorAppealDetails = {
   id: string;
+  caseNumber: string;
   version: number;
   status: string;
   statusText: string;
@@ -71,9 +74,10 @@ export type OperatorAppealDetails = {
   };
 };
 
-export async function getOperatorQueue(sort: string) {
+export async function getOperatorQueue(sort: string, leaseId: string) {
   const response = await apiClient.get<OperatorQueueResponse>('/staff/operator/queue', {
     params: { sort },
+    headers: { 'X-Operator-Work-Lease': leaseId },
   });
   return response.data;
 }
@@ -85,7 +89,7 @@ export async function getOperatorAppeal(appealId: string) {
 
 export async function triageOperatorAppeal(
   appealId: string,
-  request: { categoryId: string; priority: AppealPriority; expectedVersion: number; reason?: string },
+  request: { categoryId: string; priority: AppealPriority; expectedVersion: number; reason?: string; leaseId: string },
 ) {
   return postOperatorAction(appealId, 'triage', request);
 }
@@ -97,6 +101,7 @@ export async function assignOperatorAppeal(
     expectedVersion: number;
     allowOverCapacity: boolean;
     overrideReason?: string;
+    leaseId: string;
   },
 ) {
   return postOperatorAction(appealId, 'assign', request);
@@ -104,14 +109,14 @@ export async function assignOperatorAppeal(
 
 export async function rejectOperatorAppeal(
   appealId: string,
-  request: { reasonCode: 'Spam' | 'OutOfScope'; internalReason: string; expectedVersion: number },
+  request: { reasonCode: 'Spam' | 'OutOfScope'; internalReason: string; expectedVersion: number; leaseId: string },
 ) {
   return postOperatorAction(appealId, 'reject', request);
 }
 
 export async function resolveOperatorAppeal(
   appealId: string,
-  request: { message: string; expectedVersion: number },
+  request: { message: string; expectedVersion: number; leaseId: string },
 ) {
   return postOperatorAction(appealId, 'resolve', request);
 }
@@ -148,4 +153,66 @@ export function operatorError(error: unknown) {
   } | undefined;
   const validation = data?.errors ? Object.values(data.errors).flat()[0] : undefined;
   return validation ?? data?.detail ?? 'Не удалось выполнить действие. Повторите попытку.';
+}
+
+export function isOperatorStaleConflict(error: unknown) {
+  if (!axios.isAxiosError(error) || error.response?.status !== 409) return false;
+  const data = error.response.data as {
+    capacityOverrideRequired?: boolean;
+    operatorLeaseConflict?: boolean;
+    operatorQueueExhausted?: boolean;
+  } | undefined;
+  return data?.capacityOverrideRequired !== true
+    && data?.operatorLeaseConflict !== true
+    && data?.operatorQueueExhausted !== true;
+}
+
+export function isOperatorLeaseConflict(error: unknown) {
+  if (!axios.isAxiosError(error) || error.response?.status !== 409) return false;
+  return (error.response.data as { operatorLeaseConflict?: boolean } | undefined)?.operatorLeaseConflict === true;
+}
+
+export type OperatorWorkLease = {
+  appealId: string;
+  state: 'Mine';
+  leaseSeconds: number;
+};
+
+export type OperatorWorkSelection =
+  | { scope: 'queue'; priority?: AppealPriority }
+  | { scope: 'crisis'; priority?: never };
+
+const OPERATOR_WORK_LEASE_KEY = 'otklik:operator-work-lease';
+let memoryLeaseId: string | null = null;
+
+export function getOperatorWorkLeaseId() {
+  if (memoryLeaseId) return memoryLeaseId;
+  const stored = window.sessionStorage.getItem(OPERATOR_WORK_LEASE_KEY);
+  memoryLeaseId = stored || crypto.randomUUID();
+  if (!stored) window.sessionStorage.setItem(OPERATOR_WORK_LEASE_KEY, memoryLeaseId);
+  return memoryLeaseId;
+}
+
+export async function acquireOperatorWork(appealId: string, leaseId: string) {
+  return postOperatorWork<OperatorWorkLease>(`${appealId}/acquire`, { leaseId });
+}
+
+export async function heartbeatOperatorWork(appealId: string, leaseId: string) {
+  return postOperatorWork<OperatorWorkLease>(`${appealId}/heartbeat`, { leaseId });
+}
+
+export async function releaseOperatorWork(appealId: string, leaseId: string) {
+  return postOperatorWork<void>(`${appealId}/release`, { leaseId });
+}
+
+export async function acquireNextOperatorWork(leaseId: string, selection: OperatorWorkSelection) {
+  return postOperatorWork<OperatorWorkLease>('acquire-next', { leaseId, ...selection });
+}
+
+async function postOperatorWork<T>(path: string, request: object) {
+  const token = await staffCsrfToken();
+  const response = await apiClient.post<T>(`/staff/operator/work/${path}`, request, {
+    headers: { 'X-CSRF-TOKEN': token },
+  });
+  return response.data;
 }

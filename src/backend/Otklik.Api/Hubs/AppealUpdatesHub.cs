@@ -33,6 +33,20 @@ public sealed class AppealUpdatesHub(
         await Groups.AddToGroupAsync(Context.ConnectionId, GroupName(appealId), Context.ConnectionAborted);
     }
 
+    public Task JoinExpertWork()
+    {
+        if (Context.User?.IsInRole(StaffRoles.Expert) != true
+            || !Guid.TryParse(Context.User.FindFirstValue(ClaimTypes.NameIdentifier), out var expertId))
+        {
+            return Task.CompletedTask;
+        }
+
+        return Groups.AddToGroupAsync(
+            Context.ConnectionId,
+            ExpertWorkGroupName(expertId),
+            Context.ConnectionAborted);
+    }
+
     public async Task JoinApplicantAppeal(string? trackNumber)
     {
         if (!trackNumbers.TryNormalize(trackNumber, out var normalized))
@@ -51,4 +65,6 @@ public sealed class AppealUpdatesHub(
     }
 
     public static string GroupName(Guid appealId) => $"appeal:{appealId:N}";
+
+    public static string ExpertWorkGroupName(Guid expertId) => $"expert-work:{expertId:N}";
 }

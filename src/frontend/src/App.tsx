@@ -1,7 +1,7 @@
 import '@material/web/button/filled-button.js';
 import '@material/web/button/outlined-button.js';
 import { useQuery } from '@tanstack/react-query';
-import { BrowserRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import { createBrowserRouter, isRouteErrorResponse, Navigate, Outlet, RouterProvider, useNavigate, useRouteError } from 'react-router-dom';
 import { getSystemStatus } from './api/system';
 import { AppealIntake } from './components/AppealIntake';
 import { AppealStatusPage } from './components/AppealStatusPage';
@@ -17,18 +17,39 @@ const componentLabels: Record<string, string> = {
 };
 
 export default function App() {
+  return <RouterProvider router={appRouter} />;
+}
+
+const appRouter = createBrowserRouter([{
+  path: '/',
+  element: <Outlet />,
+  errorElement: <RouteErrorPage />,
+  children: [
+    { index: true, element: <PublicHome /> },
+    { path: 'appeal/new', element: <AppealIntake /> },
+    { path: 'appeal/status', element: <Navigate to="/appeal" replace /> },
+    { path: 'appeal/*', element: <AppealStatusPage /> },
+    { path: 'staff/*', element: <StaffPortal /> },
+    { path: 'system', element: <SystemStatusPage /> },
+    { path: '*', element: <Navigate to="/" replace /> },
+  ],
+}]);
+
+function RouteErrorPage() {
+  const error = useRouteError();
+  const notFound = isRouteErrorResponse(error) && error.status === 404;
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<PublicHome />} />
-        <Route path="/appeal/new" element={<AppealIntake />} />
-        <Route path="/appeal/status" element={<Navigate to="/appeal" replace />} />
-        <Route path="/appeal/*" element={<AppealStatusPage />} />
-        <Route path="/staff/*" element={<StaffPortal />} />
-        <Route path="/system" element={<SystemStatusPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </BrowserRouter>
+    <main className="route-error-page">
+      <section className="route-error-card" role="alert" aria-labelledby="route-error-heading">
+        <p className="kicker">{notFound ? 'Страница не найдена' : 'Не удалось открыть раздел'}</p>
+        <h1 id="route-error-heading">{notFound ? 'Проверьте адрес страницы' : 'Данные на экране не потеряны'}</h1>
+        <p>{notFound ? 'Вернитесь в нужный раздел через главную страницу.' : 'Обновите раздел. Если ошибка повторится, вернитесь в рабочий кабинет и откройте задачу снова.'}</p>
+        <div className="action-row">
+          <md-filled-button onClick={() => window.location.reload()}>Обновить страницу</md-filled-button>
+          <md-outlined-button onClick={() => window.location.assign('/staff')}>В рабочий кабинет</md-outlined-button>
+        </div>
+      </section>
+    </main>
   );
 }
 
@@ -86,7 +107,7 @@ function PublicHome() {
           </div>
           <p>
             Все уточняющие вопросы можно пропустить. Данные обращения не передаются во внешние
-            сервисы, а в отчетах не используется его текст.
+            сервисы, а в отчётах не используется его текст.
           </p>
         </section>
       </main>

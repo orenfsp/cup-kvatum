@@ -5,7 +5,7 @@
   "description": "Безопасное пространство для анонимных обращений",
   "lang": "ru",
   "dir": "ltr",
-  "start_url": "/appeal/status",
+  "start_url": "/appeal",
   "scope": "/",
   "display": "standalone",
   "background_color": "#fbfcfa",

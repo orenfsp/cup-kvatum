@@ -166,6 +166,7 @@ app.MapGet("/api/system/status", async (
 });
 
 app.MapStaffEndpoints();
+app.MapOperatorWorkEndpoints();
 app.MapOperatorEndpoints();
 app.MapExpertEndpoints();
 app.MapCollaborationEndpoints();

@@ -71,7 +71,14 @@ public sealed class CrisisFlowTests
         Assert.Equal("Standard", contactItem.GetProperty("priority").GetString());
         Assert.True(contactItem.GetProperty("hasContact").GetBoolean());
         Assert.False(noContactItem.GetProperty("hasContact").GetBoolean());
+        Assert.Equal("Первоначальное обращение", noContactItem.GetProperty("sourceText").GetString());
+        Assert.Equal("Возможная угроза жизни", noContactItem.GetProperty("riskTypeText").GetString());
+        Assert.Equal(
+            $"ОБР-{withoutContact.AppealId:N}"[..12].ToUpperInvariant(),
+            noContactItem.GetProperty("caseNumber").GetString());
+        Assert.Contains("угрожают убить", noContactItem.GetProperty("narrative").GetString(), StringComparison.Ordinal);
         Assert.DoesNotContain(privateContact, queue.GetRawText(), StringComparison.Ordinal);
+        Assert.DoesNotContain(withoutContact.TrackNumber, queue.GetRawText(), StringComparison.Ordinal);
         var primaryQueue = await GetJsonAsync(operatorClient, "api/staff/operator/queue");
         var primaryIds = primaryQueue.GetProperty("items").EnumerateArray()
             .Select(item => item.GetProperty("id").GetGuid()).ToList();
@@ -105,6 +112,20 @@ public sealed class CrisisFlowTests
             new { expectedVersion = contactItem.GetProperty("version").GetInt32() });
         Assert.Equal(HttpStatusCode.OK, urgent.StatusCode);
         Assert.Equal("Urgent", (await ReadJsonAsync(urgent)).GetProperty("priority").GetString());
+
+        var invalidDismiss = await PostCsrfAsync(
+            operatorClient,
+            $"api/staff/operator/crisis/{withoutContact.AppealId}/dismiss",
+            new { expectedVersion = noContactItem.GetProperty("version").GetInt32(), reason = "коротко" });
+        Assert.Equal(HttpStatusCode.BadRequest, invalidDismiss.StatusCode);
+        var dismissed = await PostCsrfAsync(
+            operatorClient,
+            $"api/staff/operator/crisis/{withoutContact.AppealId}/dismiss",
+            new { expectedVersion = noContactItem.GetProperty("version").GetInt32(), reason = "Контекст не указывает на непосредственную угрозу сейчас." });
+        Assert.Equal(HttpStatusCode.OK, dismissed.StatusCode);
+        var queueAfterDismiss = await GetJsonAsync(operatorClient, "api/staff/operator/crisis");
+        Assert.DoesNotContain(queueAfterDismiss.GetProperty("items").EnumerateArray(),
+            item => item.GetProperty("id").GetGuid() == withoutContact.AppealId);
     }
 
     [Fact]
@@ -166,6 +187,8 @@ public sealed class CrisisFlowTests
         Assert.Equal("Standard", item.GetProperty("priority").GetString());
         Assert.False(item.GetProperty("hasContact").GetBoolean());
         Assert.False(item.GetProperty("canOpenInPrimaryQueue").GetBoolean());
+        Assert.Equal("Новое сообщение заявителя в диалоге", item.GetProperty("sourceText").GetString());
+        Assert.DoesNotContain("меня сейчас избивают", item.GetRawText(), StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task<CreatedAppeal> CreateAppealAsync(

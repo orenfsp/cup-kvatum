@@ -1,23 +1,28 @@
-import type { CrisisSupportContact } from '../api/publicAppeals';
+import type { ApplicantType, CrisisSupportContact } from '../api/publicAppeals';
 
 export function CrisisHelpPanel({
   contacts,
   contactValue,
   onContactChange,
+  applicantType,
   compact = false,
 }: {
   contacts: CrisisSupportContact[];
   contactValue?: string;
   onContactChange?: (value: string) => void;
+  applicantType?: ApplicantType;
   compact?: boolean;
 }) {
+  const isStudent = applicantType === 'Student';
+
   return (
     <aside className={compact ? 'crisis-help crisis-help--compact' : 'crisis-help'} aria-labelledby="crisis-help-heading">
       <p className="eyebrow">Помощь прямо сейчас</p>
       <h2 id="crisis-help-heading">Если опасность рядом</h2>
       <p>
-        Перейдите туда, где есть безопасный взрослый или другие люди. Если есть непосредственная угроза жизни,
-        позвоните 112 сами или попросите человека рядом сделать это.
+        {isStudent
+          ? 'Перейди туда, где есть взрослый, которому ты доверяешь, или другие люди. Если жизни угрожает опасность, позвони 112 сам или попроси человека рядом сделать это.'
+          : 'Перейдите туда, где есть человек, которому вы доверяете, или другие люди. Если жизни угрожает опасность, позвоните 112 сами или попросите человека рядом сделать это.'}
       </p>
       <a className="crisis-emergency-link" href="tel:112">Позвонить 112</a>
       <div className="crisis-contact-list" aria-label="Телефоны доверия">
@@ -29,8 +34,9 @@ export function CrisisHelpPanel({
         ))}
       </div>
       <p>
-        Отклик не знает, кто вы и где вы, и без контакта не может направить физическую помощь.
-        Обращение все равно можно отправить и продолжить анонимный диалог.
+        {isStudent
+          ? 'Отклик не знает, кто ты и где находишься, и без контакта не может направить помощь на место. Обращение всё равно можно отправить и продолжить анонимный диалог.'
+          : 'Отклик не знает, кто вы и где находитесь, и без контакта не может направить помощь на место. Обращение всё равно можно отправить и продолжить анонимный диалог.'}
       </p>
       {onContactChange ? (
         <label className="text-field crisis-contact-field">

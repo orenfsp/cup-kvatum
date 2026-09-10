@@ -15,6 +15,7 @@ import { AppHeader } from './PublicFrame';
 import { ExpertWorkspace } from './ExpertWorkspace';
 import { OperatorWorkspace } from './OperatorWorkspace';
 import { StaffAppShell, type StaffNavigationItem } from './ux/AppShells';
+import { useExpertWorkSummary } from './ux/useExpertWorkSummary';
 
 const AdminWorkspace = lazy(() => import('./AdminWorkspace').then((module) => ({
   default: module.AdminWorkspace,
@@ -36,10 +37,12 @@ export const rolePresentation: Record<StaffRole, RolePresentation> = {
     className: 'operator',
     defaultPath: '/staff/operator/queue',
     navigation: [
-      { label: 'Очередь', to: '/staff/operator/queue' },
+      { label: 'Линия', to: '/staff/operator/line', activePrefixes: ['/staff/operator/line'] },
+      { label: 'Разбор обращений', to: '/staff/operator/queue' },
       { label: 'Срочная помощь', to: '/staff/operator/urgent' },
-      { label: 'Запросы экспертов', to: '/staff/operator/requests' },
+      { label: 'Запросы специалистов', to: '/staff/operator/requests' },
       { label: 'Возвраты', to: '/staff/operator/returns' },
+      { label: 'Жалобы', to: '/staff/operator/complaints' },
       { label: 'Аналитика', to: '/staff/analytics', analytics: true },
     ],
   },
@@ -48,10 +51,10 @@ export const rolePresentation: Record<StaffRole, RolePresentation> = {
     className: 'expert',
     defaultPath: '/staff/expert/inbox',
     navigation: [
-      { label: 'Новые назначения', to: '/staff/expert/inbox', activePrefixes: ['/staff/expert/cases'] },
-      { label: 'В работе', to: '/staff/expert/active' },
-      { label: 'Ждут заявителя', to: '/staff/expert/waiting' },
-      { label: 'Завершённые', to: '/staff/expert/completed' },
+      { label: 'Новые назначения', to: '/staff/expert/inbox', activeMatch: { pathPrefix: '/staff/expert/cases', searchParam: 'from', value: 'inbox' } },
+      { label: 'В работе', to: '/staff/expert/active', activeMatch: { pathPrefix: '/staff/expert/cases', searchParam: 'from', value: 'active' } },
+      { label: 'Ждут заявителя', to: '/staff/expert/waiting', activeMatch: { pathPrefix: '/staff/expert/cases', searchParam: 'from', value: 'waiting' } },
+      { label: 'Завершённые', to: '/staff/expert/completed', activeMatch: { pathPrefix: '/staff/expert/cases', searchParam: 'from', value: 'completed' } },
       { label: 'Аналитика', to: '/staff/analytics', analytics: true },
     ],
   },
@@ -181,10 +184,12 @@ function RoleDashboard({ session }: { session: StaffSession }) {
   const location = useLocation();
   const role = session.roles[0];
   const presentation = role ? rolePresentation[role] : undefined;
+  const expertWorkSummary = useExpertWorkSummary(role === 'Expert');
   const logoutMutation = useMutation({
     mutationFn: logoutStaff,
     onSuccess: () => {
-      queryClient.clear();
+      queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== 'staff-session' });
+      queryClient.setQueryData(['staff-session'], null);
       navigate('/staff', { replace: true });
     },
   });
@@ -198,13 +203,27 @@ function RoleDashboard({ session }: { session: StaffSession }) {
   }
 
   const routeNotice = (location.state as { routeNotice?: string } | null)?.routeNotice;
+  const navigation = role === 'Expert' && expertWorkSummary.data
+    ? presentation.navigation.map((item) => {
+      const section = item.to.split('/').at(-1) as 'inbox' | 'active' | 'waiting' | 'completed';
+      const count = section in expertWorkSummary.data ? expertWorkSummary.data[section] : undefined;
+      return {
+        ...item,
+        count,
+        attention: section === 'active' && count !== undefined && count > 0,
+        meta: section === 'active' && count !== undefined && count > 0
+          ? `${count} ${count === 1 ? 'требует' : 'требуют'} действия`
+          : undefined,
+      };
+    })
+    : presentation.navigation;
 
   return (
     <StaffAppShell
       displayName={session.displayName}
       roleLabel={presentation.label}
       roleClassName={presentation.className}
-      navigation={presentation.navigation}
+      navigation={navigation}
       logoutPending={logoutMutation.isPending}
       onLogout={() => logoutMutation.mutate()}
     >
@@ -229,14 +248,19 @@ function RoleRoutes({ role, defaultPath }: { role: StaffRole; defaultPath: strin
         <Route path="analytics" element={<AnalyticsWorkspace />} />
         {role === 'Operator' ? (
           <>
+            <Route path="operator/line" element={<OperatorWorkspace view="line" />} />
+            <Route path="operator/line/:linePriority" element={<OperatorWorkspace view="line" />} />
+            <Route path="operator/line/:linePriority/:appealId" element={<OperatorWorkspace view="line" />} />
             <Route path="operator/queue" element={<OperatorWorkspace view="queue" />} />
             <Route path="operator/queue/:appealId" element={<OperatorWorkspace view="queue" />} />
             <Route path="operator/urgent" element={<OperatorWorkspace view="crisis" />} />
             <Route path="operator/urgent/:appealId" element={<OperatorWorkspace view="crisis" />} />
             <Route path="operator/requests" element={<OperatorWorkspace view="requests" />} />
             <Route path="operator/requests/:appealId" element={<OperatorWorkspace view="requests" />} />
-            <Route path="operator/returns" element={<OperatorWorkspace view="lifecycle" />} />
-            <Route path="operator/returns/:appealId" element={<OperatorWorkspace view="lifecycle" />} />
+            <Route path="operator/returns" element={<OperatorWorkspace view="returns" />} />
+            <Route path="operator/returns/:appealId" element={<OperatorWorkspace view="returns" />} />
+            <Route path="operator/complaints" element={<OperatorWorkspace view="complaints" />} />
+            <Route path="operator/complaints/:complaintId" element={<OperatorWorkspace view="complaints" />} />
           </>
         ) : null}
         {role === 'Expert' ? (
@@ -250,14 +274,20 @@ function RoleRoutes({ role, defaultPath }: { role: StaffRole; defaultPath: strin
         ) : null}
         {role === 'Administrator' ? (
           <>
-            <Route path="admin" element={<AdminWorkspace view="configuration" />} />
-            <Route path="admin/overview" element={<AdminWorkspace view="configuration" />} />
-            <Route path="admin/categories" element={<AdminWorkspace view="configuration" />} />
-            <Route path="admin/expert-groups" element={<AdminWorkspace view="configuration" />} />
-            <Route path="admin/routing-rules" element={<AdminWorkspace view="configuration" />} />
+            <Route path="admin" element={<AdminWorkspace view="overview" />} />
+            <Route path="admin/overview" element={<Navigate to="/staff/admin" replace />} />
+            <Route path="admin/categories" element={<AdminWorkspace view="categories" />} />
+            <Route path="admin/categories/:categoryId" element={<AdminWorkspace view="categories" />} />
+            <Route path="admin/expert-groups" element={<AdminWorkspace view="groups" />} />
+            <Route path="admin/expert-groups/:groupId" element={<AdminWorkspace view="groups" />} />
+            <Route path="admin/routing-rules" element={<AdminWorkspace view="rules" />} />
+            <Route path="admin/routing-rules/:ruleId" element={<AdminWorkspace view="rules" />} />
             <Route path="admin/users" element={<AdminWorkspace view="users" />} />
+            <Route path="admin/users/:userId" element={<AdminWorkspace view="users" />} />
             <Route path="admin/stuck" element={<AdminWorkspace view="stuck" />} />
+            <Route path="admin/stuck/:appealId" element={<AdminWorkspace view="stuck" />} />
             <Route path="admin/audit" element={<AdminWorkspace view="audit" />} />
+            <Route path="admin/audit/:eventId" element={<AdminWorkspace view="audit" />} />
           </>
         ) : null}
         <Route path="" element={<Navigate to={defaultPath} replace />} />
