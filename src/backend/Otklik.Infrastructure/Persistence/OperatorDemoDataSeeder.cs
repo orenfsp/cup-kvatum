@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Otklik.Application.Attachments;
 using Otklik.Application.Security;
 using Otklik.Domain.Appeals;
 
@@ -10,11 +11,14 @@ public sealed class OperatorDemoDataSeeder(
     OtklikDbContext database,
     ITrackNumberService trackNumbers,
     IDataProtectionProvider dataProtection,
+    IPrivateAttachmentStorage attachmentStorage,
     ILogger<OperatorDemoDataSeeder> logger)
 {
     private const string RecoveryPurpose = "AppealTrackRecovery.v1";
+    private const string CrisisContactPurpose = "AppealCrisisContact.v1";
     private static readonly Guid OperatorUserId = Guid.Parse("10000000-0000-0000-0000-000000000001");
     private static readonly Guid PrimaryExpertUserId = Guid.Parse("10000000-0000-0000-0000-000000000002");
+    private static readonly Guid AdministratorUserId = Guid.Parse("10000000-0000-0000-0000-000000000003");
     private static readonly Guid MediatorExpertUserId = Guid.Parse("10000000-0000-0000-0000-000000000004");
     private static readonly Guid[] ExpertUserIds = [PrimaryExpertUserId, MediatorExpertUserId];
 
@@ -59,7 +63,12 @@ public sealed class OperatorDemoDataSeeder(
         Demo(12, "ОТК-RUSH-DEFG", ApplicantType.Student, SubmissionPath.FreeText, null,
             AppealStatus.New, AppealPriority.Standard, 0.35, null,
             "Мне угрожают прямо сейчас, я боюсь возвращаться один и мне нужна помощь.", "Рядом со школой", "Сейчас",
-            crisisFlag: true)
+            crisisFlag: true),
+        Demo(13, "ОТК-CARE-BCDF", ApplicantType.Parent, SubmissionPath.FreeText, null,
+            AppealStatus.New, AppealPriority.Urgent, 0.2, null,
+            "Ребенок сообщил о прямой угрозе, мы в безопасном месте и готовы поговорить с оператором.", "Дома", "Сегодня",
+            crisisFlag: true),
+        .. BuildQueueAppeals()
     ];
 
     public async Task SeedAsync(CancellationToken cancellationToken = default)
@@ -142,10 +151,156 @@ public sealed class OperatorDemoDataSeeder(
             });
         }
 
+        await SeedRelatedDemoDataAsync(seedStartedAt, cancellationToken);
         await database.SaveChangesAsync(cancellationToken);
         logger.LogInformation(
             "Development demo seed is ready; created {AppealCount} appeals across all workflow states",
             createdCount);
+    }
+
+    private async Task SeedRelatedDemoDataAsync(
+        DateTimeOffset seedStartedAt,
+        CancellationToken cancellationToken)
+    {
+        await AddIfMissingAsync(
+            database.AppealMessages,
+            ChildId(6, 410),
+            () => new AppealMessage
+            {
+                Id = ChildId(6, 410),
+                AppealId = DemoAppeals[5].Id,
+                ClientMessageId = ChildId(6, 411),
+                Author = AppealMessageAuthor.Expert,
+                AuthorUserId = PrimaryExpertUserId,
+                Body = "Давайте вместе уточним: кто из взрослых уже знает о ситуации?",
+                CreatedAt = seedStartedAt.AddHours(-11)
+            }, cancellationToken);
+        await AddIfMissingAsync(
+            database.AppealMessages,
+            ChildId(6, 412),
+            () => new AppealMessage
+            {
+                Id = ChildId(6, 412),
+                AppealId = DemoAppeals[5].Id,
+                ClientMessageId = ChildId(6, 413),
+                Author = AppealMessageAuthor.Applicant,
+                Body = "Знает классный руководитель, но ребенок пока боится рассказывать подробнее.",
+                CreatedAt = seedStartedAt.AddHours(-10.5)
+            }, cancellationToken);
+
+        await AddIfMissingAsync(
+            database.AppealExpertParticipants,
+            ChildId(6, 202),
+            () => new AppealExpertParticipant
+            {
+                Id = ChildId(6, 202),
+                AppealId = DemoAppeals[5].Id,
+                ExpertUserId = MediatorExpertUserId,
+                Role = AppealExpertRole.CoExecutor,
+                AddedByUserId = OperatorUserId,
+                AddedAt = seedStartedAt.AddHours(-10)
+            }, cancellationToken);
+        await AddIfMissingAsync(
+            database.AppealAssignmentEvents,
+            ChildId(6, 203),
+            () => new AppealAssignmentEvent
+            {
+                Id = ChildId(6, 203),
+                AppealId = DemoAppeals[5].Id,
+                EventType = "CoExecutorAdded",
+                ExpertUserId = MediatorExpertUserId,
+                Role = AppealExpertRole.CoExecutor,
+                ActorUserId = OperatorUserId,
+                OccurredAt = seedStartedAt.AddHours(-10)
+            }, cancellationToken);
+
+        var operatorActions = new[]
+        {
+            new OperatorActionLog { Id = ChildId(4, 710), AppealId = DemoAppeals[3].Id, ActorUserId = OperatorUserId, Action = "Triaged", FromValue = "New", ToValue = "Triaged", OccurredAt = seedStartedAt.AddHours(-4.5) },
+            new OperatorActionLog { Id = ChildId(5, 710), AppealId = DemoAppeals[4].Id, ActorUserId = OperatorUserId, Action = "Assigned", ToValue = "Эксперт демо", OccurredAt = seedStartedAt.AddHours(-7.5) },
+            new OperatorActionLog { Id = ChildId(11, 710), AppealId = DemoAppeals[10].Id, ActorUserId = OperatorUserId, Action = "Rejected", FromValue = "New", ToValue = "Rejected", Reason = "Повторяющееся рекламное сообщение.", OccurredAt = seedStartedAt.AddHours(-1.5) },
+            new OperatorActionLog { Id = ChildId(12, 710), AppealId = DemoAppeals[11].Id, ActorUserId = OperatorUserId, Action = "CrisisSignalDetected", ToValue = "LifeThreat", OccurredAt = seedStartedAt.AddMinutes(-19) }
+        };
+        foreach (var action in operatorActions)
+        {
+            if (!await database.OperatorActionLogs.AnyAsync(item => item.Id == action.Id, cancellationToken))
+                database.OperatorActionLogs.Add(action);
+        }
+
+        await AddIfMissingAsync(
+            database.AppealResultFeedbacks,
+            ChildId(10, 620),
+            () => new AppealResultFeedback
+            {
+                Id = ChildId(10, 620),
+                ClientFeedbackId = ChildId(10, 621),
+                AppealId = DemoAppeals[9].Id,
+                Score = 5,
+                Comment = "Стало понятно, как безопасно провести разговор.",
+                CreatedAt = seedStartedAt.AddHours(-46)
+            }, cancellationToken);
+
+        var contactProtector = dataProtection.CreateProtector(CrisisContactPurpose);
+        if (!await database.AppealCrisisContacts.AnyAsync(item => item.AppealId == DemoAppeals[12].Id, cancellationToken))
+        {
+            database.AppealCrisisContacts.Add(new AppealCrisisContact
+            {
+                AppealId = DemoAppeals[12].Id,
+                Ciphertext = contactProtector.Protect("+7 900 000-00-13"),
+                CreatedAt = seedStartedAt.AddMinutes(-11)
+            });
+        }
+        await AddIfMissingAsync(
+            database.CrisisContactAccessLogs,
+            ChildId(13, 720),
+            () => new CrisisContactAccessLog
+            {
+                Id = ChildId(13, 720),
+                AppealId = DemoAppeals[12].Id,
+                OperatorUserId = OperatorUserId,
+                AccessedAt = seedStartedAt.AddMinutes(-8)
+            }, cancellationToken);
+
+        var attachmentId = ChildId(6, 730);
+        if (!await database.AppealAttachments.AnyAsync(item => item.Id == attachmentId, cancellationToken))
+        {
+            var content = Convert.FromBase64String(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
+            var storageKey = await attachmentStorage.StoreAsync(content, ".png", cancellationToken);
+            database.AppealAttachments.Add(new AppealAttachment
+            {
+                Id = attachmentId,
+                AppealId = DemoAppeals[5].Id,
+                ClientUploadId = ChildId(6, 731),
+                DisplayName = "Изображение 1.png",
+                ContentType = "image/png",
+                Size = content.LongLength,
+                StorageKey = storageKey,
+                CreatedAt = seedStartedAt.AddHours(-11.5)
+            });
+        }
+
+        var auditEvents = new[]
+        {
+            new AdministrativeAuditEvent { Id = ChildId(99, 900), ActorUserId = AdministratorUserId, ActorDisplayName = "Администратор демо", Action = "PlatformSettingUpdated", TargetType = "PlatformSetting", TargetId = ChildId(99, 1), BeforeMetadataJson = "{\"autoCloseDays\":5}", AfterMetadataJson = "{\"autoCloseDays\":7}", Reason = "Демонстрация истории изменений.", OccurredAt = seedStartedAt.AddDays(-3) },
+            new AdministrativeAuditEvent { Id = ChildId(99, 901), ActorUserId = AdministratorUserId, ActorDisplayName = "Администратор демо", Action = "ExpertAvailabilityUpdated", TargetType = "StaffUser", TargetId = MediatorExpertUserId, BeforeMetadataJson = "{\"isAvailable\":false}", AfterMetadataJson = "{\"isAvailable\":true}", OccurredAt = seedStartedAt.AddDays(-2) },
+            new AdministrativeAuditEvent { Id = ChildId(99, 902), ActorUserId = AdministratorUserId, ActorDisplayName = "Администратор демо", Action = "StuckAppealReviewed", TargetType = "Appeal", TargetId = DemoAppeals[6].Id, AfterMetadataJson = "{\"status\":\"NeedsClarification\"}", Reason = "Проверено ожидание ответа заявителя.", OccurredAt = seedStartedAt.AddDays(-1) }
+        };
+        foreach (var auditEvent in auditEvents)
+        {
+            if (!await database.AdministrativeAuditEvents.AnyAsync(item => item.Id == auditEvent.Id, cancellationToken))
+                database.AdministrativeAuditEvents.Add(auditEvent);
+        }
+    }
+
+    private static async Task AddIfMissingAsync<TEntity>(
+        DbSet<TEntity> set,
+        Guid id,
+        Func<TEntity> factory,
+        CancellationToken cancellationToken)
+        where TEntity : class
+    {
+        if (await set.FindAsync(new object[] { id }, cancellationToken) is null) set.Add(factory());
     }
 
     private Appeal CreateAppeal(DemoAppeal demo, DateTimeOffset createdAt, IDataProtector protector)
@@ -359,6 +514,49 @@ public sealed class OperatorDemoDataSeeder(
             frequency,
             returnCount,
             crisisFlag);
+
+    private static DemoAppeal[] BuildQueueAppeals()
+    {
+        string[] narratives =
+        [
+            "В классном чате появляются обидные сообщения, нужен безопасный план действий.",
+            "После перемены возникают споры, и хочется найти спокойный способ договориться.",
+            "Ученик переживает из-за давления и боится просить о помощи взрослых.",
+            "Не знаю, как назвать ситуацию, но она повторяется и мешает спокойно учиться."
+        ];
+        Guid[] categories = [AppealCategory.BullyingId, AppealCategory.ConflictId, AppealCategory.PressureId, AppealCategory.UnsureId];
+        ApplicantType[] applicants = [ApplicantType.Student, ApplicantType.Parent, ApplicantType.Teacher];
+
+        return Enumerable.Range(14, 36)
+            .Select(number => Demo(
+                number,
+                QueueTrackNumber(number),
+                applicants[number % applicants.Length],
+                SubmissionPath.Category,
+                categories[number % categories.Length],
+                AppealStatus.New,
+                number % 7 == 0 ? AppealPriority.Low : AppealPriority.Standard,
+                1 + number * 0.6,
+                null,
+                narratives[number % narratives.Length],
+                number % 2 == 0 ? "В школе" : "В чате класса",
+                number % 3 == 0 ? "Каждую неделю" : "Несколько раз"))
+            .ToArray();
+    }
+
+    private static string QueueTrackNumber(int number)
+    {
+        const string alphabet = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+        Span<char> secret = stackalloc char[8];
+        secret.Fill('2');
+        var remainder = number;
+        for (var index = secret.Length - 1; index >= 0 && remainder > 0; index--)
+        {
+            secret[index] = alphabet[remainder % alphabet.Length];
+            remainder /= alphabet.Length;
+        }
+        return $"ОТК-{secret[..4]}-{secret[4..]}";
+    }
 
     private static Guid ChildId(int demoNumber, int recordNumber) =>
         Guid.Parse($"60000000-0000-0000-{demoNumber:D4}-{recordNumber:D12}");

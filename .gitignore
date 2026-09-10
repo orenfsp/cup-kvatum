@@ -47,10 +47,10 @@ appsettings.*.local.json
 *.code-workspace
 
 # Runtime and generated private data
-data/
-uploads/
-attachments/
-exports/
+/data/
+/uploads/
+/attachments/
+/exports/
 *.db
 *.db-shm
 *.db-wal
